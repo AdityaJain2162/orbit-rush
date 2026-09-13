@@ -1,10 +1,10 @@
 /**
- * OrbitCanvas.tsx — pure UI-thread renderer for Orbit Rush.
+ * OrbitCanvas.tsx — pure UI-thread renderer for the 2-lane vertical runner.
  *
- * Reads SharedValues from the engine and renders the track ring, hazards,
- * shards, player orb + ghost trail, and near-miss plasma pulse. All motion is
- * driven by `useAnimatedStyle` / `useAnimatedProps` — no JS state, no
- * setInterval. A full-screen tap layer toggles the player's track.
+ * Reads SharedValues from the engine and renders: lane lines, scrolling
+ * road, hazards, shards, player orb + ghost trail, and near-miss pulse.
+ * All motion is driven by `useAnimatedStyle` — no JS state, no setInterval.
+ * A full-screen tap layer toggles the player's lane.
  */
 import React, { useCallback, useEffect } from 'react';
 import { StyleSheet, View, useWindowDimensions } from 'react-native';
@@ -12,102 +12,78 @@ import Animated, { useAnimatedStyle } from 'react-native-reanimated';
 import { Colors, GameGeometry } from '../theme/theme';
 import type { OrbitEngine } from './useOrbitEngine';
 
-const ORB_SIZE = 26;
-const HAZARD_SIZE = 22;
-const SHARD_SIZE = 14;
-const TRAIL_SIZES = [22, 19, 16];
+const ORB_SIZE = 28;
+const HAZARD_SIZE = 48;
+const SHARD_SIZE = 18;
+const TRAIL_SIZES = [24, 21, 18];
 
 export const OrbitCanvas: React.FC<{ engine: OrbitEngine }> = ({ engine }) => {
   const { width, height } = useWindowDimensions();
-  const cx = width / 2;
-  const cy = height / 2;
 
   useEffect(() => {
-    engine.setCenter(cx, cy);
-  }, [cx, cy, engine]);
+    engine.setScreenSize(width, height);
+  }, [width, height, engine]);
+
+  const playerY = height * GameGeometry.playerYFraction;
+  const lane0X = width * GameGeometry.laneXFractions[0];
+  const lane1X = width * GameGeometry.laneXFractions[1];
 
   // ---- Player orb ----
-  const playerStyle = useAnimatedStyle(() => {
-    const r = engine.radius.value;
-    const x = cx + r * Math.cos(engine.theta.value);
-    const y = cy + r * Math.sin(engine.theta.value);
-    return {
-      transform: [
-        { translateX: x - ORB_SIZE / 2 },
-        { translateY: y - ORB_SIZE / 2 },
-      ],
-    };
-  });
+  const playerStyle = useAnimatedStyle(() => ({
+    transform: [
+      { translateX: engine.playerX.value - ORB_SIZE / 2 },
+      { translateY: playerY - ORB_SIZE / 2 },
+    ],
+  }));
 
-  // ---- Trail orbs (ghosts) ----
+  // ---- Trail orbs (ghosts behind player) ----
   const trailStyles = TRAIL_SIZES.map((_, i) =>
-    useAnimatedStyle(() => {
-      const offset = GameGeometry.trailOffsets[i];
-      const t = engine.theta.value - offset;
-      const r = engine.radius.value;
-      const x = cx + r * Math.cos(t);
-      const y = cy + r * Math.sin(t);
-      return {
-        transform: [
-          { translateX: x - TRAIL_SIZES[i] / 2 },
-          { translateY: y - TRAIL_SIZES[i] / 2 },
-        ],
-        opacity: GameGeometry.trailOpacities[i],
-      };
-    }),
+    useAnimatedStyle(() => ({
+      transform: [
+        { translateX: engine.playerX.value - TRAIL_SIZES[i] / 2 },
+        { translateY: playerY - TRAIL_SIZES[i] / 2 + GameGeometry.trailOffsets[i] },
+      ],
+      opacity: GameGeometry.trailOpacities[i],
+    })),
   );
 
-  // ---- Near-miss plasma pulse ----
-  const pulseStyle = useAnimatedStyle(() => {
-    const scale = 1 + engine.nearMissPulse.value * 1.5;
-    return {
-      transform: [{ scale }],
-      opacity: engine.nearMissPulse.value * 0.6,
-    };
+  // ---- Near-miss plasma pulse (follows player, fully animated) ----
+  const pulseStyle = useAnimatedStyle(() => ({
+    transform: [
+      { translateX: engine.playerX.value - 60 },
+      { translateY: playerY - 60 },
+      { scale: 1 + engine.nearMissPulse.value * 1.5 },
+    ],
+    opacity: engine.nearMissPulse.value * 0.5,
+  }));
+
+  // ---- Scrolling lane lines (decorative) ----
+  const laneLineStyle = useAnimatedStyle(() => {
+    const offset = engine.scrollOffset.value % 80;
+    return { transform: [{ translateY: -offset }] };
   });
 
-  // ---- Hazards ----
-  const hazardStyles = Array.from({ length: engine.hazardAngle.length }, (_, i) =>
+  // ---- Hazards & shards (unified style, type read in worklet) ----
+  const objStyles = Array.from({ length: engine.objWorldY.length }, (_, i) =>
     useAnimatedStyle(() => {
-      const active = engine.hazardActive[i].value;
-      if (!active) return { opacity: 0, transform: [{ translateX: -9999 }] };
-      const r =
-        engine.hazardTrack[i].value === 0
-          ? GameGeometry.insideRadius
-          : GameGeometry.outsideRadius;
-      const x = cx + r * Math.cos(engine.hazardAngle[i].value);
-      const y = cy + r * Math.sin(engine.hazardAngle[i].value);
-      const color = engine.hazardTrack[i].value === 0 ? Colors.hazardInside : Colors.hazardOutside;
+      const active = engine.objActive[i].value;
+      if (!active) return { opacity: 0, transform: [{ translateX: -9999 }, { translateY: 0 }], backgroundColor: 'transparent', width: 0, height: 0, borderRadius: 0 } as any;
+      const screenY = engine.objWorldY[i].value - engine.scrollOffset.value;
+      const lane = engine.objLane[i].value;
+      const x = lane === 0 ? lane0X : lane1X;
+      const type = engine.objType[i].value;
+      const size = type === 1 ? HAZARD_SIZE : SHARD_SIZE;
+      const bg = type === 1 ? Colors.hazardLeft : Colors.shard;
+      const glow = type === 1 ? Colors.hazardGlow : Colors.shardGlow;
       return {
-        transform: [
-          { translateX: x - HAZARD_SIZE / 2 },
-          { translateY: y - HAZARD_SIZE / 2 },
-        ],
+        transform: [{ translateX: x - size / 2 }, { translateY: screenY - size / 2 }],
         opacity: 1,
-        backgroundColor: color,
-        shadowColor: color,
-      };
-    }),
-  );
-
-  // ---- Shards ----
-  const shardStyles = Array.from({ length: engine.shardAngle.length }, (_, i) =>
-    useAnimatedStyle(() => {
-      const active = engine.shardActive[i].value;
-      if (!active) return { opacity: 0, transform: [{ translateX: -9999 }] };
-      const r =
-        engine.shardTrack[i].value === 0
-          ? GameGeometry.insideRadius
-          : GameGeometry.outsideRadius;
-      const x = cx + r * Math.cos(engine.shardAngle[i].value);
-      const y = cy + r * Math.sin(engine.shardAngle[i].value);
-      return {
-        transform: [
-          { translateX: x - SHARD_SIZE / 2 },
-          { translateY: y - SHARD_SIZE / 2 },
-        ],
-        opacity: 1,
-      };
+        width: size,
+        height: size,
+        borderRadius: size / 2,
+        backgroundColor: bg,
+        shadowColor: glow,
+      } as any;
     }),
   );
 
@@ -122,54 +98,25 @@ export const OrbitCanvas: React.FC<{ engine: OrbitEngine }> = ({ engine }) => {
       onStartShouldSetResponder={() => true}
       onResponderGrant={handleTap}
     >
-      {/* Track ring (static SVG-like via nested views) */}
-      <View
-        style={[
-          styles.ringBase,
-          {
-            width: GameGeometry.outsideRadius * 2,
-            height: GameGeometry.outsideRadius * 2,
-            borderRadius: GameGeometry.outsideRadius,
-            left: cx - GameGeometry.outsideRadius,
-            top: cy - GameGeometry.outsideRadius,
-          },
-        ]}
-      />
-      <View
-        style={[
-          styles.ringInner,
-          {
-            width: GameGeometry.insideRadius * 2,
-            height: GameGeometry.insideRadius * 2,
-            borderRadius: GameGeometry.insideRadius,
-            left: cx - GameGeometry.insideRadius,
-            top: cy - GameGeometry.insideRadius,
-          },
-        ]}
-      />
-      <View
-        style={[
-          styles.ringMid,
-          {
-            width: GameGeometry.baseRadius * 2,
-            height: GameGeometry.baseRadius * 2,
-            borderRadius: GameGeometry.baseRadius,
-            left: cx - GameGeometry.baseRadius,
-            top: cy - GameGeometry.baseRadius,
-          },
-        ]}
-      />
+      {/* Lane background */}
+      <View style={[styles.laneBg, { left: 0, width: width * 0.5 }]} />
+      <View style={[styles.laneBg, { left: width * 0.5, width: width * 0.5 }]} />
 
-      {/* Near-miss plasma pulse */}
+      {/* Scrolling lane divider lines */}
+      <Animated.View style={[styles.laneDivider, { left: width * 0.5 - 1 }, laneLineStyle]} />
+
+      {/* Lane edge lines */}
+      <View style={[styles.edgeLine, { left: width * 0.16 }]} />
+      <View style={[styles.edgeLine, { left: width * 0.84 }]} />
+
+      {/* Near-miss pulse (follows player via animated style) */}
       <Animated.View
         style={[
           styles.pulse,
           {
-            width: GameGeometry.baseRadius * 2,
-            height: GameGeometry.baseRadius * 2,
-            borderRadius: GameGeometry.baseRadius,
-            left: cx - GameGeometry.baseRadius,
-            top: cy - GameGeometry.baseRadius,
+            width: 120,
+            height: 120,
+            borderRadius: 60,
           },
           pulseStyle,
         ]}
@@ -188,28 +135,9 @@ export const OrbitCanvas: React.FC<{ engine: OrbitEngine }> = ({ engine }) => {
         />
       ))}
 
-      {/* Hazards */}
-      {hazardStyles.map((s, i) => (
-        <Animated.View
-          key={`haz-${i}`}
-          style={[
-            styles.hazard,
-            { width: HAZARD_SIZE, height: HAZARD_SIZE, borderRadius: HAZARD_SIZE / 2 },
-            s,
-          ]}
-        />
-      ))}
-
-      {/* Shards */}
-      {shardStyles.map((s, i) => (
-        <Animated.View
-          key={`shard-${i}`}
-          style={[
-            styles.shard,
-            { width: SHARD_SIZE, height: SHARD_SIZE, borderRadius: SHARD_SIZE / 2 },
-            s,
-          ]}
-        />
+      {/* Hazards & shards (style determined in worklet) */}
+      {objStyles.map((s, i) => (
+        <Animated.View key={`obj-${i}`} style={[styles.objBase, s]} />
       ))}
 
       {/* Player */}
@@ -225,23 +153,26 @@ export const OrbitCanvas: React.FC<{ engine: OrbitEngine }> = ({ engine }) => {
 };
 
 const styles = StyleSheet.create({
-  ringBase: {
+  laneBg: {
     position: 'absolute',
-    borderWidth: 1.5,
-    borderColor: Colors.trackRing,
-    backgroundColor: 'transparent',
+    top: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(22, 25, 38, 0.3)',
   },
-  ringMid: {
+  laneDivider: {
     position: 'absolute',
-    borderWidth: 1,
-    borderColor: 'rgba(22, 25, 38, 0.8)',
-    backgroundColor: 'transparent',
+    top: 0,
+    bottom: 0,
+    width: 2,
+    backgroundColor: Colors.laneLine,
   },
-  ringInner: {
+  edgeLine: {
     position: 'absolute',
-    borderWidth: 1.5,
-    borderColor: Colors.trackRing,
-    backgroundColor: 'transparent',
+    top: 0,
+    bottom: 0,
+    width: 1.5,
+    backgroundColor: Colors.playerGlow,
+    opacity: 0.15,
   },
   pulse: {
     position: 'absolute',
@@ -267,21 +198,12 @@ const styles = StyleSheet.create({
     shadowRadius: 10,
     shadowOpacity: 0.5,
   },
-  hazard: {
+  objBase: {
     position: 'absolute',
     shadowOffset: { width: 0, height: 0 },
     shadowRadius: 14,
     shadowOpacity: 0.9,
     elevation: 5,
-  },
-  shard: {
-    position: 'absolute',
-    backgroundColor: Colors.shard,
-    shadowColor: Colors.shardGlow,
-    shadowOffset: { width: 0, height: 0 },
-    shadowRadius: 12,
-    shadowOpacity: 0.9,
-    elevation: 4,
   },
 });
 

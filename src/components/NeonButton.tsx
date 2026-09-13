@@ -23,7 +23,7 @@ interface NeonButtonProps {
 const VARIANT_COLORS: Record<Variant, { border: string; glow: string; text: string }> = {
   primary: { border: Colors.playerCore, glow: Colors.playerGlow, text: Colors.playerCore },
   ghost: { border: Colors.glassBorder, glow: 'transparent', text: Colors.textPrimary },
-  danger: { border: Colors.hazardInside, glow: Colors.hazardGlow, text: Colors.hazardInside },
+  danger: { border: Colors.hazardLeft, glow: Colors.hazardGlow, text: Colors.hazardLeft },
   gold: { border: Colors.shard, glow: Colors.shardGlow, text: Colors.shard },
 };
 

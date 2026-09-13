@@ -1,27 +1,29 @@
 /**
- * useOrbitEngine.ts — Orbit Rush game engine.
+ * useOrbitEngine.ts — Orbit Rush 2-lane runner engine.
  *
- * All continuous motion (player angle, radius spring, hazard spawning, score
- * accrual, difficulty ramp) runs on the Reanimated UI thread via
- * `useFrameCallback`. The JS thread is NEVER used for per-frame animation —
- * no setInterval, no React state updates for motion. JS is only touched on
- * discrete events (crash / near-miss / shard) through `runOnJS`.
+ * All continuous motion (scroll offset, player X spring, hazard/shard
+ * movement, score accrual, difficulty ramp) runs on the Reanimated UI thread
+ * via `useFrameCallback`. The JS thread is NEVER used for per-frame animation.
  *
- * Coordinate system (polar, radians):
- *   centerX = W/2, centerY = H/2
- *   x = centerX + r * cos(theta)
- *   y = centerY + r * sin(theta)
- *   R      = 115 (base)
- *   R_in   = R - 26 = 89
- *   R_out  = R + 26 = 141
+ * Coordinate system (linear, world-space):
+ *   scrollOffset increases over time (world scrolls down toward player).
+ *   screenY = worldY - scrollOffset
+ *   Player is fixed at playerY = H * 0.75, playerX springs between 2 lanes.
+ *   Hazards/shards have fixed worldY positions, recycled when off-screen.
+ *
+ * Pattern system:
+ *   Patterns are grids of [lane0, lane1] rows. The engine spawns one pattern
+ *   at a time at the top of the screen. When the pattern's last row passes the
+ *   player, the next pattern is spawned after a gap.
  *
  * Hitboxes:
- *   collision  |dθ| < 8°  AND same track   -> Game Over
- *   near-miss  |dθ| < 14° AND opposite track -> +50, combo++, purple pulse
+ *   collision  |screenY - playerY| < 28px AND same lane  -> Game Over
+ *   near-miss  |screenY - playerY| < 48px AND opp lane  -> +50, combo++
+ *   shard      |screenY - playerY| < 35px AND same lane  -> +10, +1 shard
  *
- * Difficulty: ω starts 2.4 rad/s, +5% every 10s, capped 4.5 rad/s.
+ * Difficulty: speed starts 320 px/s, +6% every 10s, capped 720 px/s.
  */
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   makeMutable,
   runOnJS,
@@ -30,7 +32,7 @@ import {
   withSpring,
   type SharedValue,
 } from 'react-native-reanimated';
-import { GameGeometry, type Track } from '../theme/theme';
+import { GameGeometry } from '../theme/theme';
 import { Feedback } from '../services/sound';
 import {
   addToWallet,
@@ -38,10 +40,9 @@ import {
   loadWallet,
   saveHighScore,
 } from '../services/storage';
+import { pickPattern, type Cell, type Pattern } from './patterns';
 
-export const POOL_SIZE = 24;
-const LEAD_ANGLE = 1.4; // rad ahead of player where hazards spawn
-const PICKUP_HIT = (10 * Math.PI) / 180; // shard pickup angular tolerance
+export const POOL_SIZE = 48; // enough for the longest pattern + gap
 
 export type Screen = 'idle' | 'playing' | 'over';
 
@@ -54,9 +55,10 @@ export interface OrbitEngine {
   finalScore: number;
 
   // SharedValues (UI thread authoritative)
-  theta: SharedValue<number>;
-  radius: SharedValue<number>;
-  omega: SharedValue<number>;
+  scrollOffset: SharedValue<number>;
+  playerX: SharedValue<number>;
+  playerLane: SharedValue<number>;
+  speed: SharedValue<number>;
   score: SharedValue<number>;
   combo: SharedValue<number>;
   shards: SharedValue<number>;
@@ -64,31 +66,22 @@ export interface OrbitEngine {
   shakeY: SharedValue<number>;
   nearMissPulse: SharedValue<number>;
   gameState: SharedValue<number>; // 0 idle, 1 playing, 2 over
-  center: SharedValue<{ x: number; y: number }>;
+  screenW: SharedValue<number>;
+  screenH: SharedValue<number>;
 
-  hazardAngle: SharedValue<number>[];
-  hazardTrack: SharedValue<number>[]; // 0 inside, 1 outside
-  hazardActive: SharedValue<number>[];
-  hazardPassed: SharedValue<number>[];
-
-  shardAngle: SharedValue<number>[];
-  shardTrack: SharedValue<number>[];
-  shardActive: SharedValue<number>[];
+  // Object pools: worldY, lane, active, passed
+  objWorldY: SharedValue<number>[];
+  objLane: SharedValue<number>[];
+  objType: SharedValue<number>[]; // 0=empty, 1=hazard, 2=shard
+  objActive: SharedValue<number>[];
+  objPassed: SharedValue<number>[];
 
   start: () => void;
   toggleTrack: () => void;
   revive: () => void;
   doubleShards: () => void;
   endRunAndCommit: () => Promise<void>;
-  setCenter: (x: number, y: number) => void;
-}
-
-function angleDiff(a: number, b: number): number {
-  'worklet';
-  let d = a - b;
-  d = ((d + Math.PI) % (2 * Math.PI)) - Math.PI;
-  if (d < -Math.PI) d += 2 * Math.PI;
-  return Math.abs(d);
+  setScreenSize: (w: number, h: number) => void;
 }
 
 function makePool(size: number, initial: number): SharedValue<number>[] {
@@ -104,9 +97,10 @@ export function useOrbitEngine(): OrbitEngine {
   const [finalScore, setFinalScore] = useState(0);
 
   // ---- SharedValues ----
-  const theta = useSharedValue(0);
-  const radius = useSharedValue(GameGeometry.insideRadius);
-  const omega = useSharedValue<number>(GameGeometry.baseOmega);
+  const scrollOffset = useSharedValue(0);
+  const playerX = useSharedValue(0);
+  const playerLane = useSharedValue<number>(0);
+  const speed = useSharedValue<number>(GameGeometry.baseSpeed);
   const score = useSharedValue(0);
   const combo = useSharedValue(1);
   const shards = useSharedValue(0);
@@ -114,22 +108,23 @@ export function useOrbitEngine(): OrbitEngine {
   const shakeY = useSharedValue(0);
   const nearMissPulse = useSharedValue(0);
   const gameState = useSharedValue(0);
-  const center = useSharedValue({ x: 0, y: 0 });
+  const screenW = useSharedValue(375);
+  const screenH = useSharedValue(667);
 
-  const playerTrack = useSharedValue<Track>('inside'); // 'inside' | 'outside'
   const survivalTime = useSharedValue(0);
-  const spawnTimer = useSharedValue(0);
   const lastTime = useSharedValue(0);
+  const nextSpawnY = useSharedValue(0); // worldY where next pattern starts
 
-  // pools (created once)
-  const hazardAngle = useRef(makePool(POOL_SIZE, -999)).current;
-  const hazardTrack = useRef(makePool(POOL_SIZE, 0)).current;
-  const hazardActive = useRef(makePool(POOL_SIZE, 0)).current;
-  const hazardPassed = useRef(makePool(POOL_SIZE, 0)).current;
+  // Pattern spawning state (JS-side, read by worklet via mutables)
+  const currentPattern = useRef<Pattern | null>(null);
+  const patternRowIndex = useRef(0);
 
-  const shardAngle = useRef(makePool(POOL_SIZE, -999)).current;
-  const shardTrack = useRef(makePool(POOL_SIZE, 0)).current;
-  const shardActive = useRef(makePool(POOL_SIZE, 0)).current;
+  // Object pools
+  const objWorldY = useRef(makePool(POOL_SIZE, -9999)).current;
+  const objLane = useRef(makePool(POOL_SIZE, 0)).current;
+  const objType = useRef(makePool(POOL_SIZE, 0)).current;
+  const objActive = useRef(makePool(POOL_SIZE, 0)).current;
+  const objPassed = useRef(makePool(POOL_SIZE, 0)).current;
 
   // ---- JS-side event handlers (invoked via runOnJS) ----
   const handleCrash = useCallback(() => {
@@ -145,6 +140,27 @@ export function useOrbitEngine(): OrbitEngine {
     Feedback.onShard();
   }, []);
 
+  // ---- Spawn one row of a pattern into the pool ----
+  const spawnRow = useCallback(
+    (rowCells: Cell[], worldY: number) => {
+      for (let lane = 0; lane < rowCells.length; lane++) {
+        const cell = rowCells[lane];
+        if (cell === 0) continue;
+        for (let i = 0; i < POOL_SIZE; i++) {
+          if (objActive[i].value === 0) {
+            objWorldY[i].value = worldY;
+            objLane[i].value = lane;
+            objType[i].value = cell; // 1=hazard, 2=shard
+            objActive[i].value = 1;
+            objPassed[i].value = 0;
+            break;
+          }
+        }
+      }
+    },
+    [objActive, objLane, objPassed, objType, objWorldY],
+  );
+
   // ---- Main frame loop (UI thread worklet) ----
   useFrameCallback((info) => {
     'worklet';
@@ -155,120 +171,164 @@ export function useOrbitEngine(): OrbitEngine {
     const now = info.timeSinceFirstFrame;
     let dt = (now - lastTime.value) / 1000;
     lastTime.value = now;
-    if (dt <= 0 || dt > 0.1) dt = 0.016; // clamp pauses / first frame
+    if (dt <= 0 || dt > 0.1) dt = 0.016;
 
-    // advance player
-    theta.value += omega.value * dt;
-    if (theta.value > Math.PI * 2) theta.value -= Math.PI * 2;
-
-    // survival score
+    // advance scroll
+    scrollOffset.value += speed.value * dt;
     score.value += dt * 10;
 
     // difficulty ramp (every 10s)
     survivalTime.value += dt;
     if (survivalTime.value >= 10) {
       survivalTime.value -= 10;
-      const next = omega.value * (1 + GameGeometry.omegaStep);
-      omega.value = Math.min(GameGeometry.maxOmega, next);
+      speed.value = Math.min(
+        GameGeometry.maxSpeed,
+        speed.value * (1 + GameGeometry.speedStep),
+      );
     }
 
-    // spawning
-    spawnTimer.value += dt;
-    const spawnInterval = Math.max(0.45, 0.9 - (omega.value - GameGeometry.baseOmega) * 0.12);
-    if (spawnTimer.value >= spawnInterval) {
-      spawnTimer.value = 0;
-      const spawnAngle = theta.value + LEAD_ANGLE;
-      const track: number = Math.random() < 0.5 ? 0 : 1;
-      for (let i = 0; i < POOL_SIZE; i++) {
-        if (hazardActive[i].value === 0) {
-          hazardAngle[i].value = spawnAngle;
-          hazardTrack[i].value = track;
-          hazardActive[i].value = 1;
-          hazardPassed[i].value = 0;
-          break;
+    const playerY = screenH.value * GameGeometry.playerYFraction;
+
+    // collision / near-miss / shard pickup
+    for (let i = 0; i < POOL_SIZE; i++) {
+      if (objActive[i].value !== 1) continue;
+      const screenY = objWorldY[i].value - scrollOffset.value;
+      const dy = Math.abs(screenY - playerY);
+      const sameLane = objLane[i].value === playerLane.value;
+
+      if (objType[i].value === 1) {
+        // hazard
+        if (dy < GameGeometry.collisionHitY && sameLane) {
+          gameState.value = 2;
+          shakeX.value = (Math.random() - 0.5) * 2 * GameGeometry.shake;
+          shakeY.value = (Math.random() - 0.5) * 2 * GameGeometry.shake;
+          runOnJS(handleCrash)();
+          return;
+        }
+        if (objPassed[i].value === 0 && dy < GameGeometry.nearMissHitY && !sameLane) {
+          objPassed[i].value = 1;
+          combo.value += 1;
+          score.value += 50;
+          nearMissPulse.value = 1;
+          shakeX.value = (Math.random() - 0.5) * 2 * GameGeometry.shake;
+          shakeY.value = (Math.random() - 0.5) * 2 * GameGeometry.shake;
+          runOnJS(handleNearMiss)();
+        }
+      } else if (objType[i].value === 2) {
+        // shard
+        if (dy < GameGeometry.shardHitY && sameLane) {
+          objActive[i].value = 0;
+          shards.value += 1;
+          score.value += 10;
+          runOnJS(handleShard)();
         }
       }
-      // 50% chance to also drop a shard on the opposite track
-      if (Math.random() < 0.5) {
-        const sTrack = track === 0 ? 1 : 0;
-        for (let i = 0; i < POOL_SIZE; i++) {
-          if (shardActive[i].value === 0) {
-            shardAngle[i].value = spawnAngle + (Math.random() - 0.5) * 0.3;
-            shardTrack[i].value = sTrack;
-            shardActive[i].value = 1;
-            break;
-          }
-        }
+
+      // recycle off-screen objects (scrolled past bottom)
+      if (screenY > screenH.value + 100) {
+        objActive[i].value = 0;
       }
     }
 
-    const pTrack = playerTrack.value === 'inside' ? 0 : 1;
-
-    // hazard collision / near-miss
-    for (let i = 0; i < POOL_SIZE; i++) {
-      if (hazardActive[i].value !== 1) continue;
-      const d = angleDiff(theta.value, hazardAngle[i].value);
-      const sameTrack = hazardTrack[i].value === pTrack;
-      if (d < GameGeometry.collisionHit && sameTrack) {
-        gameState.value = 2;
-        shakeX.value = (Math.random() - 0.5) * 2 * GameGeometry.shake;
-        shakeY.value = (Math.random() - 0.5) * 2 * GameGeometry.shake;
-        runOnJS(handleCrash)();
-        return;
-      }
-      if (hazardPassed[i].value === 0 && d < GameGeometry.nearMissHit && !sameTrack) {
-        hazardPassed[i].value = 1;
-        combo.value += 1;
-        score.value += 50;
-        nearMissPulse.value = 1;
-        shakeX.value = (Math.random() - 0.5) * 2 * GameGeometry.shake;
-        shakeY.value = (Math.random() - 0.5) * 2 * GameGeometry.shake;
-        runOnJS(handleNearMiss)();
-      }
-    }
-
-    // shard pickup
-    for (let i = 0; i < POOL_SIZE; i++) {
-      if (shardActive[i].value !== 1) continue;
-      const d = angleDiff(theta.value, shardAngle[i].value);
-      const sameTrack = shardTrack[i].value === pTrack;
-      if (d < PICKUP_HIT && sameTrack) {
-        shardActive[i].value = 0;
-        shards.value += 1;
-        score.value += 10;
-        runOnJS(handleShard)();
-      }
+    // pattern spawning — check if we need to spawn the next row
+    // nextSpawnY is the worldY of the next row to spawn
+    while (scrollOffset.value + screenH.value + 50 > nextSpawnY.value) {
+      // we need to spawn a row at nextSpawnY
+      // but pattern selection happens on JS thread; use a mutable flag
+      // For simplicity, we spawn rows based on a JS-side pattern ref
+      // communicated via a shared mutable
+      // Actually, we can't call JS from worklet synchronously, so we
+      // pre-compute the entire pattern's rows on the JS side and store
+      // them in mutables. Let's use a different approach:
+      // Pre-spawn the entire pattern at once when nextSpawnY is reached.
+      break;
     }
 
     // decay shake & pulse
     shakeX.value *= 0.85;
     shakeY.value *= 0.85;
-    if (nearMissPulse.value > 0) nearMissPulse.value = Math.max(0, nearMissPulse.value - dt * 2);
+    if (nearMissPulse.value > 0)
+      nearMissPulse.value = Math.max(0, nearMissPulse.value - dt * 2);
   });
+
+  // ---- Pattern spawning (JS-side interval) ----
+  // The spawn loop runs on a 50ms JS interval and reads SharedValues to check
+  // if a new pattern row needs to be spawned. This is NOT continuous animation
+  // — it's discrete spawning events (a few times per second).
+  const spawnTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const startSpawnLoop = useCallback(() => {
+    if (spawnTimer.current) clearInterval(spawnTimer.current);
+    currentPattern.current = null;
+    patternRowIndex.current = 0;
+    nextSpawnY.value = 0; // will be set on first spawn
+
+    spawnTimer.current = setInterval(() => {
+      if (gameState.value !== 1) return;
+      const threshold = scrollOffset.value + screenH.value + 50;
+      if (nextSpawnY.value === 0) {
+        // first spawn
+        nextSpawnY.value = scrollOffset.value + screenH.value + 50;
+      }
+      if (threshold >= nextSpawnY.value) {
+        // need to spawn a row
+        if (
+          !currentPattern.current ||
+          patternRowIndex.current >= currentPattern.current.rows.length
+        ) {
+          // pick next pattern
+          currentPattern.current = pickPattern(speed.value);
+          patternRowIndex.current = 0;
+          // add gap before the pattern
+          nextSpawnY.value += GameGeometry.patternGap;
+        }
+        if (threshold >= nextSpawnY.value) {
+          const row = currentPattern.current.rows[patternRowIndex.current];
+          spawnRow(row as Cell[], nextSpawnY.value);
+          patternRowIndex.current += 1;
+          nextSpawnY.value += GameGeometry.rowHeight;
+        }
+      }
+    }, 50);
+  }, [
+    currentPattern,
+    nextSpawnY,
+    patternRowIndex,
+    screenH,
+    scrollOffset,
+    speed,
+    spawnRow,
+  ]);
+
+  const stopSpawnLoop = useCallback(() => {
+    if (spawnTimer.current) {
+      clearInterval(spawnTimer.current);
+      spawnTimer.current = null;
+    }
+  }, []);
 
   // ---- Public actions ----
   const resetPools = () => {
     for (let i = 0; i < POOL_SIZE; i++) {
-      hazardActive[i].value = 0;
-      hazardPassed[i].value = 0;
-      hazardAngle[i].value = -999;
-      shardActive[i].value = 0;
-      shardAngle[i].value = -999;
+      objActive[i].value = 0;
+      objPassed[i].value = 0;
+      objWorldY[i].value = -9999;
+      objType[i].value = 0;
     }
   };
 
   const start = useCallback(() => {
     resetPools();
-    theta.value = 0;
-    radius.value = GameGeometry.insideRadius;
-    playerTrack.value = 'inside';
-    omega.value = GameGeometry.baseOmega;
+    scrollOffset.value = 0;
+    playerLane.value = 0;
+    playerX.value = screenW.value * GameGeometry.laneXFractions[0];
+    speed.value = GameGeometry.baseSpeed;
     score.value = 0;
     combo.value = 1;
     shards.value = 0;
     survivalTime.value = 0;
-    spawnTimer.value = 0;
     lastTime.value = 0;
+    nextSpawnY.value = 0;
     shakeX.value = 0;
     shakeY.value = 0;
     nearMissPulse.value = 0;
@@ -277,58 +337,72 @@ export function useOrbitEngine(): OrbitEngine {
     setFinalScore(0);
     gameState.value = 1;
     setScreen('playing');
+    startSpawnLoop();
   }, [
     combo,
     gameState,
-    hazardActive,
-    hazardAngle,
-    hazardPassed,
+    nextSpawnY,
     lastTime,
     nearMissPulse,
-    omega,
-    playerTrack,
-    radius,
+    objActive,
+    objPassed,
+    objType,
+    objWorldY,
+    playerLane,
+    playerX,
     score,
-    shardActive,
-    shardAngle,
+    scrollOffset,
+    screenW,
+    shards,
     shakeX,
     shakeY,
-    shards,
-    spawnTimer,
+    speed,
+    startSpawnLoop,
     survivalTime,
-    theta,
   ]);
 
   const toggleTrack = useCallback(() => {
     if (gameState.value !== 1) return;
-    const next: Track = playerTrack.value === 'inside' ? 'outside' : 'inside';
-    playerTrack.value = next;
-    const target = next === 'inside' ? GameGeometry.insideRadius : GameGeometry.outsideRadius;
-    radius.value = withSpring(target, { damping: 14, stiffness: 220 });
+    const next = playerLane.value === 0 ? 1 : 0;
+    playerLane.value = next;
+    const targetX = screenW.value * GameGeometry.laneXFractions[next];
+    playerX.value = withSpring(targetX, { damping: 14, stiffness: 220 });
     Feedback.onTrackSwitch();
-  }, [gameState, playerTrack, radius]);
+  }, [gameState, playerLane, playerX, screenW]);
 
   const revive = useCallback(() => {
-    // clear all hazards within 180° of the player
+    // clear all hazards within 200px of the player's screenY
+    const playerY = screenH.value * GameGeometry.playerYFraction;
     for (let i = 0; i < POOL_SIZE; i++) {
-      if (hazardActive[i].value === 1) {
-        const d = Math.abs(((theta.value - hazardAngle[i].value + Math.PI) % (2 * Math.PI)) - Math.PI);
-        if (d < Math.PI) {
-          hazardActive[i].value = 0;
-          hazardPassed[i].value = 1;
+      if (objActive[i].value === 1 && objType[i].value === 1) {
+        const screenY = objWorldY[i].value - scrollOffset.value;
+        if (Math.abs(screenY - playerY) < 200) {
+          objActive[i].value = 0;
+          objPassed[i].value = 1;
         }
       }
     }
     setReviveUsed(true);
     gameState.value = 1;
     setScreen('playing');
-  }, [gameState, hazardActive, hazardPassed, theta]);
+    startSpawnLoop();
+  }, [
+    gameState,
+    objActive,
+    objPassed,
+    objType,
+    objWorldY,
+    screenH,
+    scrollOffset,
+    startSpawnLoop,
+  ]);
 
   const doubleShards = useCallback(() => {
     shards.value = shards.value * 2;
   }, [shards]);
 
   const endRunAndCommit = useCallback(async () => {
+    stopSpawnLoop();
     const runShardsVal = Math.floor(shards.value);
     const runScore = Math.floor(score.value);
     setRunShards(runShardsVal);
@@ -340,13 +414,15 @@ export function useOrbitEngine(): OrbitEngine {
       const hs = await loadHighScore();
       setHighScore(hs);
     }
-  }, [score, shards]);
+  }, [score, shards, stopSpawnLoop]);
 
-  const setCenter = useCallback(
-    (x: number, y: number) => {
-      center.value = { x, y };
+  const setScreenSize = useCallback(
+    (w: number, h: number) => {
+      screenW.value = w;
+      screenH.value = h;
+      playerX.value = w * GameGeometry.laneXFractions[playerLane.value];
     },
-    [center],
+    [screenW, screenH, playerX, playerLane],
   );
 
   // hydrate wallet & high score on first render
@@ -357,6 +433,13 @@ export function useOrbitEngine(): OrbitEngine {
     loadHighScore().then(setHighScore);
   }
 
+  // cleanup spawn loop on unmount
+  useEffect(() => {
+    return () => {
+      if (spawnTimer.current) clearInterval(spawnTimer.current);
+    };
+  }, []);
+
   return {
     screen,
     wallet,
@@ -364,9 +447,10 @@ export function useOrbitEngine(): OrbitEngine {
     reviveUsed,
     runShards,
     finalScore,
-    theta,
-    radius,
-    omega,
+    scrollOffset,
+    playerX,
+    playerLane,
+    speed,
     score,
     combo,
     shards,
@@ -374,19 +458,18 @@ export function useOrbitEngine(): OrbitEngine {
     shakeY,
     nearMissPulse,
     gameState,
-    center,
-    hazardAngle,
-    hazardTrack,
-    hazardActive,
-    hazardPassed,
-    shardAngle,
-    shardTrack,
-    shardActive,
+    screenW,
+    screenH,
+    objWorldY,
+    objLane,
+    objType,
+    objActive,
+    objPassed,
     start,
     toggleTrack,
     revive,
     doubleShards,
     endRunAndCommit,
-    setCenter,
+    setScreenSize,
   };
 }

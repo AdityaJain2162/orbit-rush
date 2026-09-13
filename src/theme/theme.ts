@@ -19,8 +19,8 @@ export const Colors = {
   playerGlow: 'rgba(0, 240, 255, 0.8)',
   playerTrail: 'rgba(0, 240, 255, 0.5)',
 
-  hazardInside: '#FF0055',
-  hazardOutside: '#FF3366',
+  hazardLeft: '#FF0055',
+  hazardRight: '#FF3366',
   hazardGlow: 'rgba(255, 0, 85, 0.7)',
 
   shard: '#FFE600',
@@ -28,6 +28,9 @@ export const Colors = {
 
   nearMiss: '#A855F7',
   nearMissGlow: 'rgba(168, 85, 247, 0.7)',
+
+  laneLine: 'rgba(22, 25, 38, 0.6)',
+  laneLineGlow: 'rgba(0, 240, 255, 0.08)',
 
   glass: 'rgba(22, 25, 38, 0.85)',
   glassBorder: 'rgba(255, 255, 255, 0.12)',
@@ -58,46 +61,48 @@ export const Radius = {
   pill: 999,
 } as const;
 
-/** Game geometry constants — kept in theme so UI & engine stay in sync. */
+/**
+ * Game geometry constants for the 2-lane vertical runner.
+ * The world scrolls downward toward the player; hazards/shards have fixed
+ * worldY positions and are rendered at screenY = worldY - scrollOffset.
+ */
 export const GameGeometry = {
-  baseRadius: 115,
-  trackOffset: 26,
-  get insideRadius() {
-    return this.baseRadius - this.trackOffset;
-  },
-  get outsideRadius() {
-    return this.baseRadius + this.trackOffset;
-  },
-  /** Angular hitbox for collision (radians). 8° */
-  collisionHit: (8 * Math.PI) / 180,
-  /** Angular hitbox for near-miss (radians). 14° */
-  nearMissHit: (14 * Math.PI) / 180,
-  /** Minimum angular gap between hazards (radians). 60° */
-  minHazardGap: (60 * Math.PI) / 180,
-  /** Starting angular velocity (rad/s). */
-  baseOmega: 2.4,
-  /** Maximum angular velocity (rad/s). */
-  maxOmega: 4.5,
-  /** Fractional omega increase per 10s of survival. */
-  omegaStep: 0.05,
-  /** Trail orb angular offsets (radians) behind the player. */
-  trailOffsets: [
-    (5 * Math.PI) / 180,
-    (10 * Math.PI) / 180,
-    (15 * Math.PI) / 180,
-  ],
+  /** Number of lanes (left=0, right=1). */
+  laneCount: 2,
+  /** Lane X positions as fractions of screen width. */
+  laneXFractions: [0.33, 0.67],
+  /** Player Y as fraction of screen height (fixed near bottom). */
+  playerYFraction: 0.75,
+  /** Vertical spacing between pattern rows in world-space pixels. */
+  rowHeight: 120,
+  /** Collision hitbox: |screenY - playerY| threshold in px. */
+  collisionHitY: 28,
+  /** Near-miss hitbox: |screenY - playerY| threshold in px. */
+  nearMissHitY: 48,
+  /** Shard pickup hitbox: |screenY - playerY| threshold in px. */
+  shardHitY: 35,
+  /** Starting scroll speed in px/s. */
+  baseSpeed: 320,
+  /** Maximum scroll speed in px/s. */
+  maxSpeed: 720,
+  /** Speed increase per 10s of survival (fractional). */
+  speedStep: 0.06,
+  /** Gap between patterns in world-space px. */
+  patternGap: 80,
+  /** Trail orb Y offsets behind player in px. */
+  trailOffsets: [20, 40, 60],
   /** Trail orb opacities matching trailOffsets. */
   trailOpacities: [0.5, 0.3, 0.15],
   /** Screen-shake magnitude (px). */
   shake: 6,
 } as const;
 
-export type Track = 'inside' | 'outside';
+export type Lane = 0 | 1;
 
 export const Neon = {
   cyan: Colors.playerCore,
-  crimson: Colors.hazardInside,
-  magenta: Colors.hazardOutside,
+  crimson: Colors.hazardLeft,
+  magenta: Colors.hazardRight,
   amber: Colors.shard,
   purple: Colors.nearMiss,
 } as const;
