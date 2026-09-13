@@ -82,13 +82,15 @@ export const GameGeometry = {
   /** Shard pickup hitbox: |screenY - playerY| threshold in px. */
   shardHitY: 35,
   /** Starting scroll speed in px/s. */
-  baseSpeed: 320,
+  baseSpeed: 200,
   /** Maximum scroll speed in px/s. */
-  maxSpeed: 720,
+  maxSpeed: 680,
   /** Speed increase per 10s of survival (fractional). */
-  speedStep: 0.06,
+  speedStep: 0.05,
+  /** Grace period (seconds) before first hazard spawns. */
+  gracePeriod: 2.5,
   /** Gap between patterns in world-space px. */
-  patternGap: 80,
+  patternGap: 140,
   /** Trail orb Y offsets behind player in px. */
   trailOffsets: [20, 40, 60],
   /** Trail orb opacities matching trailOffsets. */

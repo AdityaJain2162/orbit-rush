@@ -10,7 +10,14 @@
  * right time — every row with a hazard has at least one safe lane.
  *
  * Patterns spawn at the top of the screen and scroll downward. The engine
- * picks the next pattern randomly (weighted by difficulty).
+ * picks the next pattern randomly, filtered by the current scroll speed so
+ * that harder patterns only appear as the game speeds up.
+ *
+ * Difficulty tiers:
+ *   - Tier 0 (easy):   available from speed 0.   Spacious, single hazards.
+ *   - Tier 1 (medium): available from speed 300.  Tighter spacing, some shards.
+ *   - Tier 2 (hard):   available from speed 420.  Dense, rapid toggling.
+ *   - Tier 3 (expert): available from speed 540.  Very dense, no breathing room.
  */
 
 export type Cell = 0 | 1 | 2;
@@ -23,7 +30,52 @@ export type Pattern = {
 };
 
 export const PATTERNS: Pattern[] = [
-  // ---- Zigzag: hazards alternate lanes, forcing rhythmic toggling ----
+  // ===== Tier 0: Easy (available from start) =====
+
+  // Gentle: single hazard with lots of space
+  {
+    name: 'gentle',
+    rows: [
+      [1, 0],
+      [0, 0],
+      [0, 0],
+      [0, 0],
+      [0, 1],
+      [0, 0],
+      [0, 0],
+    ],
+  },
+
+  // Free shards: no hazards, just collect
+  {
+    name: 'freeShards',
+    rows: [
+      [2, 0],
+      [0, 2],
+      [0, 0],
+      [2, 0],
+      [0, 2],
+    ],
+  },
+
+  // Single toggle: one hazard, easy to dodge
+  {
+    name: 'singleToggle',
+    rows: [
+      [0, 0],
+      [0, 0],
+      [1, 0],
+      [0, 0],
+      [0, 0],
+      [0, 0],
+      [0, 1],
+      [0, 0],
+    ],
+  },
+
+  // ===== Tier 1: Medium (speed >= 300) =====
+
+  // Zigzag: hazards alternate lanes, forcing rhythmic toggling
   {
     name: 'zigzag',
     rows: [
@@ -35,23 +87,10 @@ export const PATTERNS: Pattern[] = [
       [0, 0],
       [0, 1],
     ],
+    minSpeed: 300,
   },
 
-  // ---- Wall gap: both lanes blocked except one gap ----
-  {
-    name: 'wallGap',
-    rows: [
-      [1, 1],
-      [1, 0],
-      [1, 1],
-      [1, 1],
-      [0, 1],
-      [1, 1],
-    ],
-    minSpeed: 380,
-  },
-
-  // ---- Alternating: single hazards with shard rows between ----
+  // Alternating: single hazards with shard rows between
   {
     name: 'alternating',
     rows: [
@@ -63,23 +102,10 @@ export const PATTERNS: Pattern[] = [
       [2, 2],
       [0, 1],
     ],
+    minSpeed: 300,
   },
 
-  // ---- Tunnel: narrow safe path that shifts lanes ----
-  {
-    name: 'tunnel',
-    rows: [
-      [1, 0],
-      [1, 0],
-      [1, 0],
-      [0, 1],
-      [0, 1],
-      [0, 1],
-    ],
-    minSpeed: 400,
-  },
-
-  // ---- Diamond: shard cluster with hazards on edges ----
+  // Diamond: shard cluster with hazards on edges
   {
     name: 'diamond',
     rows: [
@@ -89,22 +115,10 @@ export const PATTERNS: Pattern[] = [
       [2, 0],
       [0, 2],
     ],
+    minSpeed: 300,
   },
 
-  // ---- Double hazard: both lanes blocked at different rows ----
-  {
-    name: 'doubleHazard',
-    rows: [
-      [1, 0],
-      [0, 1],
-      [0, 0],
-      [1, 0],
-      [0, 1],
-    ],
-    minSpeed: 360,
-  },
-
-  // ---- Corridor: long safe stretch with shards, then a hazard wall ----
+  // Corridor: long safe stretch with shards, then a hazard wall
   {
     name: 'corridor',
     rows: [
@@ -115,9 +129,55 @@ export const PATTERNS: Pattern[] = [
       [1, 1],
       [0, 1],
     ],
+    minSpeed: 300,
   },
 
-  // ---- Pulse: rapid alternating hazards (hard) ----
+  // ===== Tier 2: Hard (speed >= 420) =====
+
+  // Wall gap: both lanes blocked except one gap
+  {
+    name: 'wallGap',
+    rows: [
+      [1, 1],
+      [1, 0],
+      [1, 1],
+      [1, 1],
+      [0, 1],
+      [1, 1],
+    ],
+    minSpeed: 420,
+  },
+
+  // Tunnel: narrow safe path that shifts lanes
+  {
+    name: 'tunnel',
+    rows: [
+      [1, 0],
+      [1, 0],
+      [1, 0],
+      [0, 1],
+      [0, 1],
+      [0, 1],
+    ],
+    minSpeed: 420,
+  },
+
+  // Double hazard: both lanes blocked at different rows
+  {
+    name: 'doubleHazard',
+    rows: [
+      [1, 0],
+      [0, 1],
+      [0, 0],
+      [1, 0],
+      [0, 1],
+    ],
+    minSpeed: 420,
+  },
+
+  // ===== Tier 3: Expert (speed >= 540) =====
+
+  // Pulse: rapid alternating hazards (hard)
   {
     name: 'pulse',
     rows: [
@@ -128,7 +188,7 @@ export const PATTERNS: Pattern[] = [
       [1, 0],
       [0, 1],
     ],
-    minSpeed: 450,
+    minSpeed: 540,
   },
 ];
 

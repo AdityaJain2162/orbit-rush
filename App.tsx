@@ -25,6 +25,7 @@ import { OrbitCanvas } from './src/game/OrbitCanvas';
 import { ScoreHUD } from './src/components/ScoreHUD';
 import { StartScreen } from './src/screens/StartScreen';
 import { GameOverModal } from './src/components/GameOverModal';
+import { TutorialOverlay } from './src/components/TutorialOverlay';
 import { preloadSounds } from './src/services/sound';
 import { detectAdMode, loadRewardedAd } from './src/services/ads';
 
@@ -100,6 +101,10 @@ export default function App() {
           />
         ) : null}
       </Animated.View>
+
+      {engine.screen === 'playing' ? (
+        <TutorialOverlay visible={true} onDismiss={() => {}} />
+      ) : null}
 
       {engine.screen === 'idle' ? (
         <StartScreen

@@ -261,13 +261,18 @@ export function useOrbitEngine(): OrbitEngine {
     if (spawnTimer.current) clearInterval(spawnTimer.current);
     currentPattern.current = null;
     patternRowIndex.current = 0;
-    nextSpawnY.value = 0; // will be set on first spawn
+    // Delay first spawn by gracePeriod so the player has time to react
+    nextSpawnY.value = -1; // sentinel: not yet initialized
 
     spawnTimer.current = setInterval(() => {
       if (gameState.value !== 1) return;
       const threshold = scrollOffset.value + screenH.value + 50;
+      if (nextSpawnY.value === -1) {
+        // first spawn — add grace period worth of scroll distance
+        nextSpawnY.value =
+          scrollOffset.value + screenH.value + GameGeometry.gracePeriod * speed.value;
+      }
       if (nextSpawnY.value === 0) {
-        // first spawn
         nextSpawnY.value = scrollOffset.value + screenH.value + 50;
       }
       if (threshold >= nextSpawnY.value) {
@@ -328,7 +333,7 @@ export function useOrbitEngine(): OrbitEngine {
     shards.value = 0;
     survivalTime.value = 0;
     lastTime.value = 0;
-    nextSpawnY.value = 0;
+    nextSpawnY.value = -1; // sentinel: grace period not yet started
     shakeX.value = 0;
     shakeY.value = 0;
     nearMissPulse.value = 0;
