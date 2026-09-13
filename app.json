@@ -1,0 +1,49 @@
+{
+  "expo": {
+    "name": "Orbit Rush",
+    "slug": "orbit-rush",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#08090E"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.adityajain.orbitrush"
+    },
+    "android": {
+      "package": "com.adityajain.orbitrush",
+      "adaptiveIcon": {
+        "backgroundColor": "#08090E",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "react-native-google-mobile-ads",
+        {
+          "androidAppId": "ca-app-pub-3940256099942544~3347511713",
+          "iosAppId": "ca-app-pub-3940256099942544~1458002511",
+          "userTrackingUsageDescription": "This identifier will be used to deliver personalized ads.",
+          "skAdNetworkItems": ["cstr6suwn9.skadnetwork"]
+        }
+      ],
+      "expo-font"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "orbit-rush"
+      }
+    }
+  }
+}
