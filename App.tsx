@@ -27,7 +27,6 @@ import { StartScreen } from './src/screens/StartScreen';
 import { GameOverModal } from './src/components/GameOverModal';
 import { TutorialOverlay } from './src/components/TutorialOverlay';
 import { preloadSounds } from './src/services/sound';
-import { detectAdMode, loadRewardedAd } from './src/services/ads';
 
 export default function App() {
   const [fontsLoaded] = useFonts({
@@ -41,18 +40,12 @@ export default function App() {
 
   const engine = useOrbitEngine();
 
-  // Boot: fonts + sounds + ads
+  // Boot: fonts + sounds
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
         await preloadSounds();
-      } catch {
-        /* ignore */
-      }
-      try {
-        await detectAdMode();
-        await loadRewardedAd();
       } catch {
         /* ignore */
       }

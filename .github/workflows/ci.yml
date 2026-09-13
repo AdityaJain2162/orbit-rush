@@ -39,6 +39,9 @@ jobs:
       - name: Typecheck (tsc --noEmit)
         run: npx tsc --noEmit
 
+      - name: Ad config validation
+        run: npx tsx --tsconfig tsconfig.json src/config/ads.test.ts
+
   # ── Stage 2: Release APK build (only on main, after CI passes) ─────
   apk:
     needs: ci
