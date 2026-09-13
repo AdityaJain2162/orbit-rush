@@ -10,9 +10,14 @@
  *     overlay ("Simulating Rewarded Ad (2s)...") and invokes `onRewarded()`
  *     after 2 seconds. This guarantees the game never crashes in Expo Go.
  *
- * Detection: we attempt to require the native module. If `createForAdRequest`
- * throws (no native binary), we permanently switch to MOCK mode.
+ * Detection: we use `Constants.appOwnership` from expo-constants to detect
+ * Expo Go. If `appOwnership === 'expo'`, we NEVER import
+ * `react-native-google-mobile-ads` — Metro still bundles it but the module is
+ * only evaluated when `import()` is actually called, so skipping the call
+ * prevents the `TurboModuleRegistry.getEnforcing` crash entirely.
  */
+import Constants from 'expo-constants';
+
 export type AdMode = 'native' | 'mock';
 
 export interface RewardResult {
@@ -32,28 +37,24 @@ let rewardedAd: any = null;
 let adLoaded = false;
 let adLoading = false;
 
-/** Lazy, defensive require of the native ads module. */
-async function getAdsModule(): Promise<any | null> {
-  try {
-    const mod = await import('react-native-google-mobile-ads');
-    return mod;
-  } catch (e) {
-    return null;
-  }
+/** Returns true if running inside Expo Go (no native binary for ads). */
+function isExpoGo(): boolean {
+  return Constants.appOwnership === 'expo';
 }
 
-/** Returns true if the real native Google Mobile Ads binary is wired up. */
+/**
+ * Detect ad mode. In Expo Go we immediately return 'mock' WITHOUT importing
+ * the native ads module — this prevents the TurboModuleRegistry crash.
+ */
 export async function detectAdMode(): Promise<AdMode> {
   if (mode) return mode;
-  const mod = await getAdsModule();
-  if (!mod) {
+  if (isExpoGo()) {
     mode = 'mock';
     return mode;
   }
+  // Not Expo Go — safe to attempt the native import.
   try {
-    // createForAdRequest is a pure JS factory; it only fails if the native
-    // module is missing. We probe by creating an instance and immediately
-    // subscribing a no-op listener.
+    const mod = await import('react-native-google-mobile-ads');
     rewardedAd = mod.RewardedAd.createForAdRequest(mod.TestIds.REWARDED, {
       requestNonPersonalizedAdsOnly: true,
     });
@@ -71,7 +72,7 @@ export async function loadRewardedAd(): Promise<void> {
   if (m !== 'native' || !rewardedAd || adLoaded || adLoading) return;
   adLoading = true;
   try {
-    const mod = await getAdsModule();
+    const mod = await import('react-native-google-mobile-ads');
     if (!mod) return;
     rewardedAd.addAdEventListener(mod.RewardedAdEventType.LOADED, () => {
       adLoaded = true;
@@ -99,7 +100,7 @@ export async function showRewardedAd(opts: ShowAdOptions = {}): Promise<void> {
     return;
   }
   try {
-    const mod = await getAdsModule();
+    const mod = await import('react-native-google-mobile-ads');
     if (!mod || !rewardedAd) {
       runMockAd(opts);
       return;

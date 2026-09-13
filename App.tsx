@@ -111,8 +111,8 @@ export default function App() {
 
       <GameOverModal
         visible={engine.screen === 'over'}
-        score={Math.floor(engine.score.value)}
-        shards={Math.floor(engine.shards.value)}
+        score={engine.finalScore}
+        shards={engine.runShards}
         wallet={engine.wallet}
         highScore={engine.highScore}
         reviveUsed={engine.reviveUsed}
