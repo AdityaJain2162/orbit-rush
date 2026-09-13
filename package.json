@@ -16,7 +16,7 @@
     "react": "19.2.3",
     "react-native": "0.86.3",
     "react-native-gesture-handler": "~2.32.0",
-    "react-native-google-mobile-ads": "^16.5.0",
+    "react-native-google-mobile-ads": "^15.8.3",
     "react-native-reanimated": "4.5.1"
   },
   "devDependencies": {
