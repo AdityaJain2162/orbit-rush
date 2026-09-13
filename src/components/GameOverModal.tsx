@@ -12,6 +12,7 @@
  */
 import React, { useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
+import { BannerAd } from './BannerAd';
 import { GlassModal } from './GlassModal';
 import { NeonButton } from './NeonButton';
 import { Colors, Fonts, Spacing } from '../theme/theme';
@@ -135,6 +136,10 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
           <NeonButton label="↻ Retry" variant="danger" onPress={onRestart} style={styles.full} />
           <NeonButton label="⌂ Home" variant="ghost" onPress={onHome} style={styles.full} />
         </View>
+
+        <View style={styles.bannerWrap}>
+          <BannerAd />
+        </View>
       </GlassModal>
 
       {mockVisible ? (
@@ -195,6 +200,11 @@ const styles = StyleSheet.create({
   },
   full: {
     width: '100%',
+  },
+  bannerWrap: {
+    width: '100%',
+    alignItems: 'center',
+    marginTop: Spacing.md,
   },
   mockOverlay: {
     ...StyleSheet.absoluteFill,

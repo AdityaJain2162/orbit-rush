@@ -179,3 +179,37 @@ export function getAdMode(): AdMode {
 export function isMockMode(): boolean {
   return getAdMode() === 'mock';
 }
+
+/* ----------------------------- Banner Ad ----------------------------- */
+
+let bannerModule: any = null;
+let bannerLoading = false;
+
+/**
+ * Pre-load the banner ad module (native mode only). In Expo Go this is a no-op.
+ * Returns the module's `BannerAd` component and `BannerAdSize` enum, or null.
+ */
+export async function loadBannerModule(): Promise<{
+  BannerAd: React.ComponentType<any>;
+  BannerAdSize: any;
+  TestIds: any;
+} | null> {
+  if (bannerModule) return bannerModule;
+  if (bannerLoading) return null;
+  const m = await detectAdMode();
+  if (m !== 'native') return null;
+  bannerLoading = true;
+  try {
+    const mod = await import('react-native-google-mobile-ads');
+    bannerModule = {
+      BannerAd: mod.BannerAd,
+      BannerAdSize: mod.BannerAdSize,
+      TestIds: mod.TestIds,
+    };
+    bannerLoading = false;
+    return bannerModule;
+  } catch (e) {
+    bannerLoading = false;
+    return null;
+  }
+}

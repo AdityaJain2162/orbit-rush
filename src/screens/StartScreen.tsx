@@ -3,6 +3,7 @@
  */
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
+import { BannerAd } from '../components/BannerAd';
 import { NeonButton } from '../components/NeonButton';
 import { Colors, Fonts, Spacing } from '../theme/theme';
 
@@ -32,6 +33,8 @@ export const StartScreen: React.FC<StartScreenProps> = ({ highScore, wallet, onS
         <NeonButton label="▶ TAP TO PLAY" variant="primary" onPress={onStart} style={styles.play} />
         <Text style={styles.hint}>Tap anywhere to switch between inside / outside track</Text>
       </View>
+
+      <BannerAd />
     </View>
   );
 };
