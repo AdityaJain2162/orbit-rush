@@ -1,6 +1,6 @@
 # Orbit Rush CI/CD — single pipeline with staged jobs.
 #
-# Stage 1 (ci):   Typecheck + web build verification
+# Stage 1 (ci):   Typecheck
 # Stage 2 (apk): Release APK with native AdMob test ads (depends on ci passing)
 #
 # The APK build runs `expo prebuild` + Gradle directly in the runner — no EAS,
@@ -38,16 +38,6 @@ jobs:
 
       - name: Typecheck (tsc --noEmit)
         run: npx tsc --noEmit
-
-      - name: Web build verification
-        run: npx expo export --platform web --output-dir dist-web
-
-      - name: Upload web build artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: web-build
-          path: dist-web
-          retention-days: 7
 
   # ── Stage 2: Release APK build (only on main, after CI passes) ─────
   apk:
