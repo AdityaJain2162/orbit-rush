@@ -13,18 +13,19 @@ App.tsx                         ← root: font loading, sound preload, ad detect
 ├── src/theme/theme.ts          ← Colors, Fonts, GameGeometry, Spacing, Radius (no side-effects)
 ├── src/game/
 │   ├── useOrbitEngine.ts       ← Game state machine + Reanimated SharedValues + useFrameCallback
-│   └── OrbitCanvas.tsx          ← Pure UI-thread renderer (reads SharedValues, renders orbs/hazards/shards)
+│   ├── OrbitCanvas.tsx         ← Pure UI-thread renderer (reads SharedValues, renders lanes/orbs/hazards/shards)
+│   └── patterns.ts             ← 8 procedural pattern templates (zigzag, wallGap, tunnel, etc.)
 ├── src/components/
-│   ├── NeonButton.tsx           ← Spring-pressable button with border glow + light haptic
-│   ├── GlassModal.tsx           ← Blurred overlay card (Game Over / Revive)
-│   ├── ScoreHUD.tsx             ← Top HUD: score/combo/shards via useAnimatedProps (UI thread text)
-│   └── GameOverModal.tsx        ← Game Over card with Revive + Double Shards ad hooks
+│   ├── NeonButton.tsx          ← Spring-pressable button with border glow + light haptic
+│   ├── GlassModal.tsx          ← Blurred overlay card (Game Over / Revive)
+│   ├── ScoreHUD.tsx            ← Top HUD: score/combo/shards via useAnimatedProps (UI thread text)
+│   └── GameOverModal.tsx       ← Game Over card with Revive + Double Shards ad hooks
 ├── src/screens/
-│   └── StartScreen.tsx          ← Title screen with high score + shard bank
+│   └── StartScreen.tsx         ← Title screen with high score + shard bank
 ├── src/services/
-│   ├── sound.ts                 ← Crash-proof expo-av wrapper + expo-haptics
-│   ├── ads.ts                   ← Crash-proof Google Mobile Ads manager (native + mock)
-│   └── storage.ts               ← AsyncStorage wrapper for wallet + high score
+│   ├── sound.ts                ← Crash-proof expo-audio wrapper + expo-haptics
+│   ├── ads.ts                  ← Crash-proof Google Mobile Ads manager (native + mock)
+│   └── storage.ts              ← AsyncStorage wrapper for wallet + high score
 ├── assets/sounds/              ← CC0 WAV sound effects (synthesized, see scripts/generate-sounds.js)
 └── scripts/generate-sounds.js  ← Node script that synthesizes the 4 CC0 sound effects
 ```
@@ -33,7 +34,8 @@ App.tsx                         ← root: font loading, sound preload, ad detect
 
 | Layer | Where | Thread | Purpose |
 |-------|-------|--------|---------|
-| **Game loop** | `useOrbitEngine.ts` → `useFrameCallback` | Reanimated UI thread | Per-frame motion: θ, ω, radius spring, spawning, collision, scoring |
+| **Game loop** | `useOrbitEngine.ts` → `useFrameCallback` | Reanimated UI thread | Per-frame motion: scroll offset, speed, collision, scoring |
+| **Pattern spawning** | `useOrbitEngine.ts` → `setInterval(50ms)` | JS thread | Discrete spawning events (reads SharedValues, writes to pools) |
 | **Render** | `OrbitCanvas.tsx` → `useAnimatedStyle` | Reanimated UI thread | Translates SharedValues → view transforms (no React re-render) |
 | **HUD text** | `ScoreHUD.tsx` → `useAnimatedProps` | Reanimated UI thread | Displays score/combo/shards as text via TextInput (no JS bridge) |
 | **Screen routing** | `App.tsx` → `useState<Screen>` | JS thread | Discrete state: idle / playing / over (changes only on events) |
@@ -45,88 +47,102 @@ All continuous values are `SharedValue<number>` and live on the UI thread:
 
 | SharedValue | Type | Meaning |
 |-------------|------|---------|
-| `theta` | number | Player angular position (radians, 0–2π) |
-| `radius` | number | Current player track radius (springs between R_in and R_out) |
-| `omega` | number | Angular velocity (rad/s), starts 2.4, caps 4.5 |
+| `scrollOffset` | number | Total world-space pixels scrolled (increases over time) |
+| `playerX` | number | Player X position (springs between lane X positions) |
+| `playerLane` | number | Current lane: 0=left, 1=right |
+| `speed` | number | Scroll speed in px/s, starts 320, caps 720 |
 | `score` | number | Accumulated score (dt × 10 + event bonuses) |
 | `combo` | number | Near-miss combo multiplier |
 | `shards` | number | Shards collected this run |
 | `shakeX` / `shakeY` | number | Screen shake offset (decays ×0.85/frame) |
 | `nearMissPulse` | number | 0→1 pulse for purple plasma ring (decays over 0.5s) |
 | `gameState` | number | 0=idle, 1=playing, 2=over (UI-thread authoritative) |
-| `center` | {x,y} | Screen center for polar→cartesian conversion |
-| `hazardAngle[N]` | number | Angular position of hazard i (−999 = inactive) |
-| `hazardTrack[N]` | number | 0=inside, 1=outside |
-| `hazardActive[N]` | number | 1=active, 0=inactive |
-| `hazardPassed[N]` | number | 1=already scored as near-miss (prevents double-counting) |
-| `shardAngle[N]` | number | Angular position of shard i |
-| `shardTrack[N]` | number | 0=inside, 1=outside |
-| `shardActive[N]` | number | 1=active, 0=collected/inactive |
+| `screenW` / `screenH` | number | Screen dimensions for coordinate calculations |
+| `objWorldY[N]` | number | World-space Y of object i (−9999 = inactive) |
+| `objLane[N]` | number | Lane of object i: 0=left, 1=right |
+| `objType[N]` | number | 0=empty, 1=hazard, 2=shard |
+| `objActive[N]` | number | 1=active, 0=inactive |
+| `objPassed[N]` | number | 1=already scored as near-miss (prevents double-counting) |
 
-Pool size: `POOL_SIZE = 24` (hazards + shards each). Object pooling avoids
-per-frame allocations on the UI thread.
+Pool size: `POOL_SIZE = 48` (enough for the longest pattern + gap). Object
+pooling avoids per-frame allocations.
 
 ---
 
 ## 2. Game Loop & Math Spec
 
-### Coordinate system (polar, radians)
+### Coordinate system (linear, world-space)
 
 ```
-centerX = screenWidth  / 2
-centerY = screenHeight / 2
+screenW, screenH                 ← window dimensions
+playerY = screenH × 0.75         ← fixed player Y (near bottom)
+lane0X  = screenW × 0.33          ← left lane X
+lane1X  = screenW × 0.67          ← right lane X
 
-x = centerX + r · cos(θ)
-y = centerY + r · sin(θ)
-
-R      = 115 px  (base track radius)
-R_in   = R − 26 = 89 px   (inside track)
-R_out  = R + 26 = 141 px  (outside track)
+scrollOffset += speed × dt        ← world scrolls downward
+screenY = worldY − scrollOffset   ← convert world → screen
 ```
 
 ### Player controls
 
-- **Tap anywhere** → toggle `playerTrack` between `'inside'` and `'outside'`.
-- Radius transition: `withSpring(targetRadius, { damping: 14, stiffness: 220 })`.
+- **Tap anywhere** → toggle `playerLane` between 0 (left) and 1 (right).
+- X transition: `withSpring(targetX, { damping: 14, stiffness: 220 })`.
 - The spring runs on the UI thread; the JS thread only fires the toggle.
 
-### Angular velocity (difficulty ramp)
+### Scroll speed (difficulty ramp)
 
 ```
-ω₀     = 2.4 rad/s   (start)
-ω_step = +5% per 10s of survival
-ω_max  = 4.5 rad/s   (hard cap)
+speed₀    = 320 px/s   (start)
+speedStep = +6% per 10s of survival
+speed_max = 720 px/s   (hard cap)
 ```
 
-Implementation: `survivalTime` accumulates dt; every 10s, `omega *= 1.05`
-(capped at 4.5). The spawn interval also shrinks as ω increases:
-`spawnInterval = max(0.45, 0.9 − (ω − ω₀) × 0.12)`.
+Implementation: `survivalTime` accumulates dt; every 10s, `speed *= 1.06`
+(capped at 720).
 
-### Hazard spawning
+### Pattern system (`patterns.ts`)
 
-- Hazards spawn at `θ_player + LEAD_ANGLE` (LEAD_ANGLE = 1.4 rad ≈ 80°).
-- Minimum angular gap between consecutive hazards: 60° (enforced by spawn
-  interval, not by explicit angular check — the interval is tuned so that at
-  max ω, hazards are ≥60° apart).
-- Each hazard randomly attaches to inside (track=0) or outside (track=1).
-- 50% chance per spawn to also drop a shard on the **opposite** track.
+8 procedural patterns, each a grid of rows × 2 lanes. Cell values:
+- `0` = empty
+- `1` = hazard
+- `2` = shard
+
+| Pattern | Rows | Description | Min Speed |
+|---------|------|-------------|-----------|
+| zigzag | 7 | Hazards alternate lanes, forcing rhythmic toggling | — |
+| wallGap | 6 | Both lanes blocked except one gap per wall | 380 |
+| alternating | 7 | Single hazards with shard rows between | — |
+| tunnel | 6 | Narrow safe path that shifts lanes | 400 |
+| diamond | 5 | Shard cluster with hazards on edges | — |
+| doubleHazard | 5 | Both lanes blocked at different rows | 360 |
+| corridor | 6 | Long safe stretch with shards, then hazard wall | — |
+| pulse | 6 | Rapid alternating hazards (hard) | 450 |
+
+Patterns with `minSpeed > currentSpeed` are filtered out. The engine picks
+randomly from the available pool. Every pattern is guaranteed solvable — every
+row with a hazard has at least one safe lane.
+
+### Spawning
+
+- The spawn loop runs on a 50ms JS `setInterval` (discrete events, NOT
+  continuous animation).
+- It reads `scrollOffset` and `screenH` SharedValues to check if a new row
+  needs to appear at the top of the screen.
+- Rows are spawned into the object pool at `worldY = scrollOffset + screenH + 50`.
+- Row spacing: `GameGeometry.rowHeight = 120px`.
+- Gap between patterns: `GameGeometry.patternGap = 80px`.
 
 ### Hitbox thresholds
 
 | Event | Condition | Effect |
 |-------|-----------|--------|
-| **Collision** | `|Δθ| < 8°` AND same track | Game Over, crash haptic, screen shake |
-| **Near-miss** | `|Δθ| < 14°` AND opposite track | +50 score, combo++, purple pulse, heavy haptic, screen shake |
-| **Shard pickup** | `|Δθ| < 10°` AND same track | +10 score, +1 shard, medium haptic |
-
-Angular difference is computed via shortest-arc:
-```
-Δθ = ((θ_a − θ_b + π) mod 2π) − π
-```
+| **Collision** | `|screenY − playerY| < 28px` AND same lane | Game Over, crash haptic, screen shake |
+| **Near-miss** | `|screenY − playerY| < 48px` AND opposite lane | +50 score, combo++, purple pulse, heavy haptic, screen shake |
+| **Shard pickup** | `|screenY − playerY| < 35px` AND same lane | +10 score, +1 shard, medium haptic |
 
 ### Player trail
 
-3 ghost orbs trail the player at angular offsets 5°, 10°, 15° behind, with
+3 ghost orbs trail the player at Y offsets 20px, 40px, 60px behind, with
 opacities 0.5, 0.3, 0.15. Rendered as semi-transparent cyan circles.
 
 ### Screen shake
@@ -134,6 +150,11 @@ opacities 0.5, 0.3, 0.15. Rendered as semi-transparent cyan circles.
 On near-miss and crash, `shakeX`/`shakeY` are set to `±6px` (random), then
 decay by `×0.85` per frame. The root `<Animated.View>` applies the offset via
 `useAnimatedStyle`.
+
+### Object recycling
+
+Objects that scroll past the bottom of the screen (`screenY > screenH + 100`)
+are deactivated (`objActive = 0`) and returned to the pool for reuse.
 
 ---
 
@@ -148,11 +169,15 @@ decay by `×0.85` per frame. The root `<Animated.View>` applies the offset via
 
 ### Detection (`detectAdMode()`)
 
-1. Attempt `import('react-native-google-mobile-ads')`.
-2. If import fails → `mode = 'mock'`.
-3. If import succeeds, attempt `RewardedAd.createForAdRequest(TestIds.REWARDED)`.
-4. If creation throws → `mode = 'mock'`.
-5. Otherwise → `mode = 'native'`.
+1. Check `Constants.appOwnership === 'expo'` (from `expo-constants`).
+2. If Expo Go → immediately return `'mock'` WITHOUT importing the ads module.
+   This is critical: `react-native-google-mobile-ads` calls
+   `TurboModuleRegistry.getEnforcing('RNGoogleMobileAdsModule')` at module-eval
+   time, which throws in Expo Go. By never calling `import()`, the module
+   factory is never evaluated.
+3. If not Expo Go → attempt `import('react-native-google-mobile-ads')` and
+   `RewardedAd.createForAdRequest(TestIds.REWARDED)`.
+4. If creation throws → `'mock'`.
 
 The result is cached; `detectAdMode()` only runs once per app lifetime.
 
@@ -185,7 +210,7 @@ to show the countdown card.
 
 | Button | Condition | Ad reward | Game effect |
 |--------|-----------|-----------|-------------|
-| 🎬 Revive Run (1 Left) | `!reviveUsed` | Rewarded ad | Clears hazards within 180° of player, resumes run. Once per run. |
+| 🎬 Revive Run (1 Left) | `!reviveUsed` | Rewarded ad | Clears hazards within 200px of player, resumes run. Once per run. |
 | 💎 Double Shards (2x) | `!doubleShardsUsed && shards > 0` | Rewarded ad | `shards *= 2`. Once per run. |
 | ↻ Retry | Always | No ad | `engine.start()` (fresh run) |
 | ⌂ Home | Always | No ad | Returns to idle screen |
@@ -216,15 +241,21 @@ To regenerate: `node scripts/generate-sounds.js`
 
 ### Crash-proof audio wrapper (`sound.ts`)
 
-- `expo-av` is loaded lazily via dynamic `import()`.
-- If the module is missing or `Sound.createAsync` throws, `avAvailable` is set
+- Uses `expo-audio` (SDK 57 replacement for `expo-av`). The `expo-av` native
+  module `ExponentAV` is NOT in the Expo Go binary for SDK 57, which caused a
+  crash. `expo-audio`'s `ExpoAudio` module IS included in Expo Go.
+- `expo-audio` is loaded lazily via dynamic `import()`.
+- If the module is missing or `createAudioPlayer` throws, `avAvailable` is set
   to `false` and all subsequent `play()` calls return silently.
 - Every playback call is wrapped in try/catch — no red screen, ever.
-- The `Feedback` object bundles sound + haptic for each game event:
+- API: `createAudioPlayer({ uri })` → `player.play()` + `player.seekTo(0)`,
+  `player.volume` property for volume control.
+
+### Haptics
 
 | Event | Sound | Haptic |
 |-------|-------|--------|
-| Track switch | `switch.wav` | `ImpactFeedbackStyle.Light` |
+| Lane switch | `switch.wav` | `ImpactFeedbackStyle.Light` |
 | Shard pickup | `shard.wav` | `ImpactFeedbackStyle.Medium` |
 | Near-miss | `nearmiss.wav` | `ImpactFeedbackStyle.Heavy` |
 | Crash | `crash.wav` | `NotificationFeedbackType.Error` |
@@ -247,8 +278,22 @@ Git identity is pre-configured in `.git/config`. Do not change it.
 > updates (`useState`/`setState`) for continuous per-frame animation. All
 > continuous motion MUST run on the Reanimated UI thread via
 > `useFrameCallback` (logic) and `useAnimatedStyle` / `useAnimatedProps`
-> (rendering). React state is only for discrete events (screen changes,
-> game-over commit, modal visibility).
+> (rendering).
+>
+> **Exception**: The pattern spawn loop uses `setInterval(50ms)` — but this is
+> for discrete spawning events (a few times per second), NOT continuous
+> animation. The actual scroll motion, collision detection, and rendering
+> all happen on the UI thread.
+
+### Reanimated value-during-render rule
+
+> **NEVER** read `.value` from a SharedValue during React component render.
+> All `.value` reads must happen inside `useAnimatedStyle` / `useAnimatedProps`
+> worklets or event handlers. Reading `.value` during render triggers
+> Reanimated strict-mode warnings and can cause stale renders.
+>
+> For displaying SharedValues as text (e.g. score HUD), use
+> `useAnimatedProps` with a `TextInput` — see `ScoreHUD.tsx` for the pattern.
 
 ### Expo Go rule
 
@@ -256,7 +301,17 @@ Git identity is pre-configured in `.git/config`. Do not change it.
 > Any new native dependency must either:
 > 1. Be safe in Expo Go (JS-only or gracefully degrades), OR
 > 2. Be wrapped in a try/catch with a mock fallback (see `ads.ts` and
->    `sound.ts` for the pattern).
+>    `sound.ts` for the pattern), OR
+> 3. Be skipped entirely in Expo Go via `Constants.appOwnership === 'expo'`
+>    (see `ads.ts` for the pattern — this is required for modules that
+>    throw at module-eval time like `react-native-google-mobile-ads`).
+
+### Build-test-commit workflow
+
+> **ALWAYS** build → test → commit for each feature or fix. Do not batch
+> multiple features into a single commit. Run `npx tsc --noEmit` before every
+> commit. Verify the bundle compiles with `npx expo start --clear` when
+> changing native module dependencies.
 
 ### Code style
 
@@ -268,14 +323,13 @@ Git identity is pre-configured in `.git/config`. Do not change it.
 - Keep the UI thread worklet-free of JS-only APIs (no `console.log`, no
   `Date.now()`, no React imports inside `'worklet'` functions).
 
-### Adding new game events
+### Adding new patterns
 
-1. Add a `SharedValue` in `useOrbitEngine.ts` if it needs per-frame updates.
-2. Add the event logic inside the `useFrameCallback` worklet.
-3. If the event needs JS-side side effects (sound, haptic, storage), use
-   `runOnJS(handler)`.
-4. Add the visual in `OrbitCanvas.tsx` via `useAnimatedStyle`.
-5. Add the sound in `sound.ts` and bundle it in `Feedback`.
+1. Add the pattern to `PATTERNS` in `patterns.ts` with a unique `name`.
+2. Use cell values: `0`=empty, `1`=hazard, `2`=shard.
+3. Ensure every row with a hazard has at least one safe lane.
+4. Optionally set `minSpeed` to gate it behind difficulty.
+5. The engine automatically picks from available patterns based on speed.
 
 ---
 
@@ -284,13 +338,9 @@ Git identity is pre-configured in `.git/config`. Do not change it.
 ### Development
 
 ```bash
-# Start Expo dev server (Expo Go or dev build)
-npm start
-# or: npx expo start
-
-# Start with cache cleared (use if Metro acts up)
+# Start Expo dev server (ALWAYS use --clear after dependency changes)
 npx expo start --clear
-# or: npx expo start -c
+# or: npm start
 
 # Run on Android / iOS / Web
 npm run android
@@ -306,23 +356,24 @@ npx tsc --noEmit
 
 # Clear Metro cache
 npx expo start --clear
-
-# Clear npm cache (nuclear option)
-rm -rf node_modules && npm install
 ```
 
-### EAS Builds (production)
+### Testing Real Ads (requires dev build)
 
 ```bash
 # Install EAS CLI
 npm install -g eas-cli
 
-# Log in to Expo
-eas login
+# Build a development client (includes native ads module)
+eas build --platform android --profile development
 
-# Configure EAS
-eas build:configure
+# OR build locally
+npx expo run:android
+```
 
+### EAS Builds (production)
+
+```bash
 # Build for Android (APK)
 eas build --platform android --profile preview
 
@@ -331,10 +382,6 @@ eas build --platform android --profile production
 
 # Build for iOS
 eas build --platform ios --profile production
-
-# Submit to stores
-eas submit --platform android
-eas submit --platform ios
 ```
 
 ### Sound regeneration
@@ -386,12 +433,12 @@ own rewarded ad unit ID.
 
 ## 9. Known Limitations
 
-1. **expo-av is deprecated** — it's used because its `Audio.Sound` API is the
-   most stable across Expo Go versions. If migrating to `expo-audio`, wrap it
-   with the same crash-proof pattern in `sound.ts`.
-2. **Mock ads in Expo Go** — real AdMob rewarded video requires a dev build or
-   standalone build. Expo Go cannot load native ad modules.
+1. **Real ads require a dev build** — Expo Go cannot load native ad modules.
+   The mock flow (2s countdown) is used in Expo Go.
+2. **Pattern spawning uses setInterval** — this is for discrete spawning
+   events, not continuous animation. The actual game loop (scroll, collision,
+   rendering) runs on the Reanimated UI thread.
 3. **No background music** — only SFX are included. Add a looping ambient
-   track via `expo-av` if desired (follow the same try/catch pattern).
+   track via `expo-audio` if desired (follow the same try/catch pattern).
 4. **Trail rendering** — ghost orbs use simple opacity decay. For a smoother
    trail, consider a Skia canvas path (would require `@shopify/react-native-skia`).

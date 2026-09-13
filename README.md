@@ -1,18 +1,19 @@
 # Orbit Rush: Neon Switch
 
-A hypercasual neon arcade game built with Expo, React Native, and Reanimated.
-Tap to switch between inside and outside tracks, dodge hazards, collect shards,
-and chain near-misses for combo multipliers.
+A hypercasual neon runner game built with Expo, React Native, and Reanimated.
+Tap to switch between two lanes, dodge hazards, collect shards, and chain
+near-misses for combo multipliers. Features a procedural pattern system with
+8 difficulty-gated patterns (zigzag, tunnel, wall gap, pulse, and more).
 
 ## Features
 
-- **One-tap controls** — tap anywhere to switch between inside/outside tracks
-- **Procedural hazards** — spikes spawn on either track with increasing frequency
-- **Near-miss combo system** — dodge hazards on the opposite track for +50 and combo multiplier
-- **Shard collectibles** — gold shards spawn on the opposite track for +10 score
-- **Difficulty ramp** — angular velocity increases 5% every 10 seconds (capped at 4.5 rad/s)
+- **One-tap controls** — tap anywhere to switch between left/right lanes
+- **Procedural pattern system** — 8 patterns (zigzag, wallGap, alternating, tunnel, diamond, doubleHazard, corridor, pulse) with difficulty gating
+- **Near-miss combo system** — pass hazards on the opposite lane for +50 and combo multiplier
+- **Shard collectibles** — gold shards spawn in patterns for +10 score each
+- **Difficulty ramp** — scroll speed increases 6% every 10 seconds (capped at 720 px/s)
 - **Neon cyberpunk visual identity** — Orbitron + Rajdhani fonts, high-contrast neon palette
-- **Spring-physics track switching** — smooth `withSpring` radius interpolation
+- **Spring-physics lane switching** — smooth `withSpring` X interpolation
 - **Player trail** — 3 ghost orbs trail behind the player with decaying opacity
 - **Screen shake** — near-misses and crashes shake the screen ±6px
 - **Crash-proof audio** — CC0 sound effects with silent fallback in Expo Go
@@ -23,17 +24,17 @@ and chain near-misses for combo multipliers.
 
 ## Gameplay
 
-1. The player orb orbits a ring at a constant angular velocity.
-2. Hazards (spikes) spawn ahead on either the inside or outside track.
-3. Tap to switch tracks to dodge hazards.
-4. If you pass a hazard on the opposite track within 14°, you trigger a **near-miss** (+50, combo++).
-5. Collect gold shards for +10 score each.
+1. The player orb is fixed near the bottom of the screen.
+2. The world scrolls downward at increasing speed.
+3. Hazards (red orbs) and shards (gold orbs) spawn in patterns from the top.
+4. Tap to switch lanes to dodge hazards and collect shards.
+5. If you pass a hazard on the opposite lane within 48px, you trigger a **near-miss** (+50, combo++).
 6. Crashing into a hazard ends the run.
 7. Watch a rewarded ad to revive (once per run) or double your shards.
 
 ## Controls
 
-- **Tap anywhere** — switch between inside/outside track
+- **Tap anywhere** — switch between left/right lane
 
 ## Tech Stack
 
@@ -41,7 +42,7 @@ and chain near-misses for combo multipliers.
 - [React Native](https://reactnative.dev) 0.86
 - [React Native Reanimated](https://docs.swmansion.com/react-native-reanimated/) — UI-thread animation
 - [expo-haptics](https://docs.expo.dev/versions/latest/sdk/haptics/) — tactile feedback
-- [expo-av](https://docs.expo.dev/versions/latest/sdk/av/) — sound playback
+- [expo-audio](https://docs.expo.dev/versions/latest/sdk/audio/) — sound playback
 - [react-native-google-mobile-ads](https://docs.expo.dev/versions/latest/sdk/google-mobile-ads/) — rewarded ads
 - [@react-native-async-storage/async-storage](https://react-native-async-storage.github.io/async-storage/) — persistence
 - [@expo-google-fonts/orbitron](https://github.com/expo/google-fonts) & [@expo-google-fonts/rajdhani](https://github.com/expo/google-fonts) — typography
@@ -52,9 +53,8 @@ and chain near-misses for combo multipliers.
 # Install dependencies
 npm install
 
-# Start the dev server
-npm start
-# or: npx expo start
+# Start the dev server (use --clear after dependency changes)
+npx expo start --clear
 
 # Run on device
 npm run android   # Android
@@ -62,12 +62,26 @@ npm run ios       # iOS (requires macOS)
 npm run web       # Web
 ```
 
-## Build for Production
+## Testing Real Ads
+
+Real Google Mobile Ads cannot run in Expo Go. To test real ads:
 
 ```bash
 # Install EAS CLI
 npm install -g eas-cli
 
+# Build a development client
+eas build --platform android --profile development
+
+# OR build locally
+npx expo run:android
+```
+
+In Expo Go, the mock ad flow (2s countdown overlay) is used automatically.
+
+## Build for Production
+
+```bash
 # Build Android APK
 eas build --platform android --profile preview
 
@@ -88,8 +102,8 @@ eas build --platform ios --profile production
 
 ## Documentation
 
-For the full technical reference (architecture, game math, ad state machine,
-operational guidelines for AI agents), see [agent.md](./agent.md).
+For the full technical reference (architecture, game math, pattern system, ad
+state machine, operational guidelines for AI agents), see [agent.md](./agent.md).
 
 ## License
 
