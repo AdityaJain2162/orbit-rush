@@ -3,33 +3,34 @@
  *
  * Design goals:
  *  - NEVER throw or show a red screen in Expo Go / dev client / production.
- *  - Lazily load expo-av only if the native binary is present.
+ *  - Lazily load expo-audio only if the native binary is present.
  *  - If anything fails (module missing, file missing, native type mismatch),
  *    fail silently and continue the game.
  *  - Haptics are also best-effort (expo-haptics is JS-only on most platforms).
+ *
+ * Uses expo-audio (SDK 57 replacement for expo-av). expo-audio's native module
+ * `ExpoAudio` IS included in the Expo Go binary, so it works without a dev
+ * build. The dynamic import + try/catch wrapper still guards against any
+ * future environment where the native binary is absent.
  */
 import * as Haptics from 'expo-haptics';
 import { Asset } from 'expo-asset';
-import type { Audio } from 'expo-av';
 
-type AudioModule = typeof Audio;
-type SoundInstance = InstanceType<AudioModule['Sound']>;
+import type { AudioPlayer } from 'expo-audio';
 
-let audioMod: AudioModule | null = null;
+let audioMod: typeof import('expo-audio') | null = null;
 let avAvailable = true; // becomes false after first failed require
 
-async function ensureAudio(): Promise<AudioModule | null> {
+async function ensureAudio(): Promise<typeof import('expo-audio') | null> {
   if (!avAvailable) return null;
   if (audioMod) return audioMod;
   try {
-    // expo-av is deprecated but its Audio.Sound API is the most stable across
-    // Expo Go versions. Dynamic require isolates us from native absence.
-    const mod = (await import('expo-av')).Audio;
+    const mod = await import('expo-audio');
     audioMod = mod;
     return audioMod;
   } catch (e) {
     avAvailable = false;
-    console.warn('[audio] expo-av unavailable, sound playback disabled.');
+    console.warn('[audio] expo-audio unavailable, sound playback disabled.');
     return null;
   }
 }
@@ -43,26 +44,23 @@ const SOUND_FILES: Record<SoundName, any> = {
   crash: require('../../assets/sounds/crash.wav'),
 };
 
-const soundCache: Partial<Record<SoundName, SoundInstance>> = {};
-const loading: Partial<Record<SoundName, Promise<SoundInstance | null>>> = {};
+const playerCache: Partial<Record<SoundName, AudioPlayer>> = {};
+const loading: Partial<Record<SoundName, Promise<AudioPlayer | null>>> = {};
 
-async function loadSound(name: SoundName): Promise<SoundInstance | null> {
-  if (soundCache[name]) return soundCache[name] ?? null;
+async function loadSound(name: SoundName): Promise<AudioPlayer | null> {
+  if (playerCache[name]) return playerCache[name] ?? null;
   if (loading[name]) return loading[name] ?? null;
 
   loading[name] = (async () => {
     const mod = await ensureAudio();
     if (!mod) return null;
     try {
-      // Make sure the asset is downloaded/cached by Metro.
+      // Resolve the asset URI via expo-asset so Metro caches the file.
       const [asset] = await Asset.loadAsync(SOUND_FILES[name]);
       const uri = asset.localUri ?? asset.uri;
-      const { sound } = await mod.Sound.createAsync(
-        { uri },
-        { shouldPlay: false, isLooping: false, volume: 0.8 },
-      );
-      soundCache[name] = sound;
-      return sound;
+      const player = mod.createAudioPlayer({ uri });
+      playerCache[name] = player;
+      return player;
     } catch (e: any) {
       console.warn(`[audio] failed to create player for "${name}":`, e?.message ?? e);
       return null;
@@ -81,22 +79,19 @@ export async function preloadSounds(): Promise<void> {
 
 async function play(name: SoundName, volume = 0.8): Promise<void> {
   try {
-    const sound = await loadSound(name);
-    if (!sound) return;
+    const player = await loadSound(name);
+    if (!player) return;
     try {
-      await sound.setVolumeAsync(volume);
+      player.volume = volume;
     } catch {
       /* ignore volume errors */
     }
     try {
-      await sound.replayAsync();
+      // expo-audio has no replayAsync; seek to start then play.
+      player.seekTo(0);
+      player.play();
     } catch {
-      try {
-        await sound.setPositionAsync(0);
-        await sound.playAsync();
-      } catch {
-        /* swallow */
-      }
+      /* swallow */
     }
   } catch (e) {
     /* never surface */
