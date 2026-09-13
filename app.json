@@ -42,11 +42,6 @@
       ],
       "expo-font",
       "expo-audio"
-    ],
-    "extra": {
-      "eas": {
-        "projectId": "orbit-rush"
-      }
-    }
+    ]
   }
 }
