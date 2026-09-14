@@ -13,8 +13,9 @@ import { Colors, GameGeometry } from '../theme/theme';
 import type { OrbitEngine } from './useOrbitEngine';
 
 const ORB_SIZE = 28;
-const HAZARD_SIZE = 48;
-const SHARD_SIZE = 18;
+const HAZARD_W = 52;
+const HAZARD_H = 44;
+const SHARD_SIZE = 22;
 const TRAIL_SIZES = [24, 21, 18];
 
 export const OrbitCanvas: React.FC<{ engine: OrbitEngine }> = ({ engine }) => {
@@ -57,32 +58,52 @@ export const OrbitCanvas: React.FC<{ engine: OrbitEngine }> = ({ engine }) => {
     opacity: engine.nearMissPulse.value * 0.5,
   }));
 
-  // ---- Scrolling lane lines (decorative) ----
+  // ---- Lane line scroll (decorative, moves down with world) ----
   const laneLineStyle = useAnimatedStyle(() => {
     const offset = engine.scrollOffset.value % 80;
-    return { transform: [{ translateY: -offset }] };
+    return { transform: [{ translateY: offset }] };
   });
 
   // ---- Hazards & shards (unified style, type read in worklet) ----
+  // Hazards: neon barrier blocks (rounded rect with border)
+  // Shards: diamond crystals (rotated 45° square)
   const objStyles = Array.from({ length: engine.objWorldY.length }, (_, i) =>
     useAnimatedStyle(() => {
       const active = engine.objActive[i].value;
       if (!active) return { opacity: 0, transform: [{ translateX: -9999 }, { translateY: 0 }], backgroundColor: 'transparent', width: 0, height: 0, borderRadius: 0 } as any;
-      const screenY = engine.objWorldY[i].value - engine.scrollOffset.value;
+      const screenY = engine.scrollOffset.value - engine.objWorldY[i].value + height;
       const lane = engine.objLane[i].value;
       const x = lane === 0 ? lane0X : lane1X;
       const type = engine.objType[i].value;
-      const size = type === 1 ? HAZARD_SIZE : SHARD_SIZE;
-      const bg = type === 1 ? Colors.hazardLeft : Colors.shard;
-      const glow = type === 1 ? Colors.hazardGlow : Colors.shardGlow;
+      if (type === 1) {
+        // Hazard: neon barrier block
+        return {
+          transform: [{ translateX: x - HAZARD_W / 2 }, { translateY: screenY - HAZARD_H / 2 }],
+          opacity: 1,
+          width: HAZARD_W,
+          height: HAZARD_H,
+          borderRadius: 6,
+          borderWidth: 2,
+          borderColor: Colors.hazardLeft,
+          backgroundColor: 'rgba(255, 0, 85, 0.15)',
+          shadowColor: Colors.hazardGlow,
+        } as any;
+      }
+      // Shard: diamond crystal (rotated 45°)
       return {
-        transform: [{ translateX: x - size / 2 }, { translateY: screenY - size / 2 }],
+        transform: [
+          { translateX: x - SHARD_SIZE / 2 },
+          { translateY: screenY - SHARD_SIZE / 2 },
+          { rotate: '45deg' },
+        ],
         opacity: 1,
-        width: size,
-        height: size,
-        borderRadius: size / 2,
-        backgroundColor: bg,
-        shadowColor: glow,
+        width: SHARD_SIZE,
+        height: SHARD_SIZE,
+        borderRadius: 4,
+        borderWidth: 1.5,
+        borderColor: Colors.shard,
+        backgroundColor: 'rgba(255, 230, 0, 0.25)',
+        shadowColor: Colors.shardGlow,
       } as any;
     }),
   );

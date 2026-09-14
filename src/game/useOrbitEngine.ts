@@ -7,7 +7,7 @@
  *
  * Coordinate system (linear, world-space):
  *   scrollOffset increases over time (world scrolls down toward player).
- *   screenY = worldY - scrollOffset
+ *   screenY = scrollOffset - worldY + screenH  (objects move DOWN)
  *   Player is fixed at playerY = H * 0.75, playerX springs between 2 lanes.
  *   Hazards/shards have fixed worldY positions, recycled when off-screen.
  *
@@ -192,7 +192,7 @@ export function useOrbitEngine(): OrbitEngine {
     // collision / near-miss / shard pickup
     for (let i = 0; i < POOL_SIZE; i++) {
       if (objActive[i].value !== 1) continue;
-      const screenY = objWorldY[i].value - scrollOffset.value;
+      const screenY = scrollOffset.value - objWorldY[i].value + screenH.value;
       const dy = Math.abs(screenY - playerY);
       const sameLane = objLane[i].value === playerLane.value;
 
@@ -380,7 +380,7 @@ export function useOrbitEngine(): OrbitEngine {
     const playerY = screenH.value * GameGeometry.playerYFraction;
     for (let i = 0; i < POOL_SIZE; i++) {
       if (objActive[i].value === 1 && objType[i].value === 1) {
-        const screenY = objWorldY[i].value - scrollOffset.value;
+        const screenY = scrollOffset.value - objWorldY[i].value + screenH.value;
         if (Math.abs(screenY - playerY) < 200) {
           objActive[i].value = 0;
           objPassed[i].value = 1;
