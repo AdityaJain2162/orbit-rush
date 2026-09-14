@@ -6,8 +6,10 @@
  * the Reanimated UI thread inside useOrbitEngine + OrbitCanvas.
  */
 import React, { useEffect, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Alert, BackHandler, Platform, StyleSheet, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import * as NavigationBar from 'expo-navigation-bar';
+import { useKeepAwake } from 'expo-keep-awake';
 import Animated, { useAnimatedStyle } from 'react-native-reanimated';
 import {
   useFonts,
@@ -40,6 +42,9 @@ export default function App() {
 
   const engine = useOrbitEngine();
 
+  // Keep screen awake during gameplay (no auto-sleep).
+  useKeepAwake();
+
   // Boot: fonts + sounds
   useEffect(() => {
     let cancelled = false;
@@ -54,6 +59,46 @@ export default function App() {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  // Fullscreen immersive mode — hide status bar + Android navigation bar.
+  useEffect(() => {
+    if (Platform.OS === 'android') {
+      try {
+        NavigationBar.setVisibilityAsync('hidden');
+        NavigationBar.setStyle('dark');
+      } catch {
+        // Navigation bar module not available (e.g. Expo Go) — no-op.
+      }
+    }
+    return () => {
+      if (Platform.OS === 'android') {
+        try {
+          NavigationBar.setVisibilityAsync('visible');
+        } catch {
+          // no-op
+        }
+      }
+    };
+  }, []);
+
+  // Android hardware back-button → confirmation dialog before exiting.
+  useEffect(() => {
+    const subscription = BackHandler.addEventListener(
+      'hardwareBackPress',
+      () => {
+        Alert.alert(
+          'Exit Game?',
+          'Are you sure you want to quit Orbit Rush?',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Exit', style: 'destructive', onPress: () => BackHandler.exitApp() },
+          ],
+        );
+        return true; // prevent default back behavior
+      },
+    );
+    return () => subscription.remove();
   }, []);
 
   // Commit run to storage when the game ends.
@@ -81,7 +126,7 @@ export default function App() {
 
   return (
     <View style={styles.root}>
-      <StatusBar style="light" />
+      <StatusBar style="light" hidden={true} />
       <Animated.View style={[StyleSheet.absoluteFill, shakeStyle]}>
         {engine.screen !== 'idle' ? <OrbitCanvas engine={engine} /> : null}
 
