@@ -82,6 +82,7 @@ export interface OrbitEngine {
   doubleShards: () => void;
   endRunAndCommit: () => Promise<void>;
   setScreenSize: (w: number, h: number) => void;
+  goHome: () => void;
 }
 
 function makePool(size: number, initial: number): SharedValue<number>[] {
@@ -111,7 +112,6 @@ export function useOrbitEngine(): OrbitEngine {
   const screenW = useSharedValue(375);
   const screenH = useSharedValue(667);
 
-  const survivalTime = useSharedValue(0);
   const lastTime = useSharedValue(0);
   const nextSpawnY = useSharedValue(0); // worldY where next pattern starts
 
@@ -177,15 +177,13 @@ export function useOrbitEngine(): OrbitEngine {
     scrollOffset.value += speed.value * dt;
     score.value += dt * 10;
 
-    // difficulty ramp (every 10s)
-    survivalTime.value += dt;
-    if (survivalTime.value >= 10) {
-      survivalTime.value -= 10;
-      speed.value = Math.min(
-        GameGeometry.maxSpeed,
-        speed.value * (1 + GameGeometry.speedStep),
-      );
-    }
+    // difficulty ramp — continuous gradual speed increase (compounds every
+    // frame instead of jumping 5% every 10s, so the pace feels smooth).
+    // Equivalent to speedStep per 10s, but applied smoothly per frame.
+    speed.value = Math.min(
+      GameGeometry.maxSpeed,
+      speed.value * (1 + (GameGeometry.speedStep * dt) / 10),
+    );
 
     const playerY = screenH.value * GameGeometry.playerYFraction;
 
@@ -331,7 +329,6 @@ export function useOrbitEngine(): OrbitEngine {
     score.value = 0;
     combo.value = 1;
     shards.value = 0;
-    survivalTime.value = 0;
     lastTime.value = 0;
     nextSpawnY.value = -1; // sentinel: grace period not yet started
     shakeX.value = 0;
@@ -363,7 +360,6 @@ export function useOrbitEngine(): OrbitEngine {
     shakeY,
     speed,
     startSpawnLoop,
-    survivalTime,
   ]);
 
   const toggleTrack = useCallback(() => {
@@ -430,6 +426,13 @@ export function useOrbitEngine(): OrbitEngine {
     [screenW, screenH, playerX, playerLane],
   );
 
+  const goHome = useCallback(() => {
+    stopSpawnLoop();
+    resetPools();
+    gameState.value = 0;
+    setScreen('idle');
+  }, [gameState, stopSpawnLoop]);
+
   // hydrate wallet & high score on first render
   const hydrated = useRef(false);
   if (!hydrated.current) {
@@ -476,5 +479,6 @@ export function useOrbitEngine(): OrbitEngine {
     doubleShards,
     endRunAndCommit,
     setScreenSize,
+    goHome,
   };
 }

@@ -92,13 +92,13 @@ screenY = worldY − scrollOffset   ← convert world → screen
 ### Scroll speed (difficulty ramp)
 
 ```
-speed₀    = 320 px/s   (start)
-speedStep = +6% per 10s of survival
-speed_max = 720 px/s   (hard cap)
+speed₀    = 200 px/s   (start)
+speedStep = +5% per 10s of survival (continuous, applied per-frame)
+speed_max = 680 px/s   (hard cap)
 ```
 
-Implementation: `survivalTime` accumulates dt; every 10s, `speed *= 1.06`
-(capped at 720).
+Implementation: every frame, `speed *= (1 + speedStep * dt / 10)`, capped at
+`maxSpeed`. This produces a smooth, gradual ramp instead of step-wise jumps.
 
 ### Pattern system (`patterns.ts`)
 

@@ -166,10 +166,7 @@ export default function App() {
           setDoubleShardsUsed(true);
         }}
         onRestart={engine.start}
-        onHome={() => {
-          // reset to idle by forcing a re-render with screen state
-          engine.start();
-        }}
+        onHome={engine.goHome}
       />
     </View>
   );

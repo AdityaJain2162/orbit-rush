@@ -85,7 +85,7 @@ export const GameGeometry = {
   baseSpeed: 200,
   /** Maximum scroll speed in px/s. */
   maxSpeed: 680,
-  /** Speed increase per 10s of survival (fractional). */
+  /** Speed increase per second of survival (fractional, continuous). */
   speedStep: 0.05,
   /** Grace period (seconds) before first hazard spawns. */
   gracePeriod: 2.5,
