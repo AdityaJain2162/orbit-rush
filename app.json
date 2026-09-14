@@ -30,6 +30,7 @@
     },
     "plugins": [
       "./plugins/withKotlinVersion",
+      "./plugins/withNoBackup",
       "expo-navigation-bar",
       [
         "react-native-google-mobile-ads",

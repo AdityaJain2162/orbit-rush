@@ -48,16 +48,6 @@ export const OrbitCanvas: React.FC<{ engine: OrbitEngine }> = ({ engine }) => {
     })),
   );
 
-  // ---- Near-miss plasma pulse (follows player, fully animated) ----
-  const pulseStyle = useAnimatedStyle(() => ({
-    transform: [
-      { translateX: engine.playerX.value - 60 },
-      { translateY: playerY - 60 },
-      { scale: 1 + engine.nearMissPulse.value * 1.5 },
-    ],
-    opacity: engine.nearMissPulse.value * 0.5,
-  }));
-
   // ---- Lane line scroll (decorative, moves down with world) ----
   const laneLineStyle = useAnimatedStyle(() => {
     const offset = engine.scrollOffset.value % 80;
@@ -130,19 +120,6 @@ export const OrbitCanvas: React.FC<{ engine: OrbitEngine }> = ({ engine }) => {
       <View style={[styles.edgeLine, { left: width * 0.16 }]} />
       <View style={[styles.edgeLine, { left: width * 0.84 }]} />
 
-      {/* Near-miss pulse (follows player via animated style) */}
-      <Animated.View
-        style={[
-          styles.pulse,
-          {
-            width: 120,
-            height: 120,
-            borderRadius: 60,
-          },
-          pulseStyle,
-        ]}
-      />
-
       {/* Trail */}
       {TRAIL_SIZES.map((size, i) => (
         <Animated.View
@@ -194,16 +171,6 @@ const styles = StyleSheet.create({
     width: 1.5,
     backgroundColor: Colors.playerGlow,
     opacity: 0.15,
-  },
-  pulse: {
-    position: 'absolute',
-    borderWidth: 2,
-    borderColor: Colors.nearMiss,
-    backgroundColor: 'transparent',
-    shadowColor: Colors.nearMiss,
-    shadowOffset: { width: 0, height: 0 },
-    shadowRadius: 30,
-    shadowOpacity: 0.8,
   },
   orb: {
     position: 'absolute',

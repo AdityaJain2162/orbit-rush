@@ -71,7 +71,6 @@ const AnimatedNumber: React.FC<{
     <AnimatedTextInput
       editable={false}
       animatedProps={animatedProps}
-      value={`${prefix}0`}
       style={[styles.hiddenInput, style]}
       pointerEvents="none"
     />
