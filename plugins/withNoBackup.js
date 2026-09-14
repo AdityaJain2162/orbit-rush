@@ -14,8 +14,6 @@ module.exports = function withNoBackup(config) {
     const application = manifest.modResults.manifest.application;
     if (application && application.length > 0) {
       application[0].$['android:allowBackup'] = 'false';
-      application[0].$['android:fullBackupContent'] = 'false';
-      application[0].$['android:dataExtractionRules'] = 'false';
     }
     return manifest;
   });
