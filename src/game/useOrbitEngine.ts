@@ -53,6 +53,8 @@ export interface OrbitEngine {
   reviveUsed: boolean;
   runShards: number;
   finalScore: number;
+  shieldActive: boolean;
+  magnetActive: boolean;
 
   // SharedValues (UI thread authoritative)
   scrollOffset: SharedValue<number>;
@@ -68,6 +70,8 @@ export interface OrbitEngine {
   gameState: SharedValue<number>; // 0 idle, 1 playing, 2 over
   screenW: SharedValue<number>;
   screenH: SharedValue<number>;
+  shieldGlow: SharedValue<number>;
+  magnetGlow: SharedValue<number>;
 
   // Object pools: worldY, lane, active, passed
   objWorldY: SharedValue<number>[];
@@ -83,6 +87,10 @@ export interface OrbitEngine {
   endRunAndCommit: () => Promise<void>;
   setScreenSize: (w: number, h: number) => void;
   goHome: () => void;
+  pause: () => void;
+  resume: () => void;
+  equipShield: () => void;
+  equipMagnet: () => void;
 }
 
 function makePool(size: number, initial: number): SharedValue<number>[] {
@@ -96,6 +104,8 @@ export function useOrbitEngine(): OrbitEngine {
   const [reviveUsed, setReviveUsed] = useState(false);
   const [runShards, setRunShards] = useState(0);
   const [finalScore, setFinalScore] = useState(0);
+  const [shieldActive, setShieldActive] = useState(false);
+  const [magnetActive, setMagnetActive] = useState(false);
 
   // ---- SharedValues ----
   const scrollOffset = useSharedValue(0);
@@ -111,6 +121,8 @@ export function useOrbitEngine(): OrbitEngine {
   const gameState = useSharedValue(0);
   const screenW = useSharedValue(375);
   const screenH = useSharedValue(667);
+  const shieldGlow = useSharedValue(0);
+  const magnetGlow = useSharedValue(0);
 
   const lastTime = useSharedValue(0);
   const nextSpawnY = useSharedValue(0); // worldY where next pattern starts
@@ -138,6 +150,11 @@ export function useOrbitEngine(): OrbitEngine {
 
   const handleShard = useCallback(() => {
     Feedback.onShard();
+  }, []);
+
+  const handleShieldBreak = useCallback(() => {
+    Feedback.onNearMiss(); // reuse heavy haptic + sound
+    setShieldActive(false);
   }, []);
 
   // ---- Spawn one row of a pattern into the pool ----
@@ -197,6 +214,16 @@ export function useOrbitEngine(): OrbitEngine {
       if (objType[i].value === 1) {
         // hazard
         if (dy < GameGeometry.collisionHitY && sameLane) {
+          // Shield absorbs one hit
+          if (shieldGlow.value > 0) {
+            shieldGlow.value = 0;
+            runOnJS(handleShieldBreak)();
+            objActive[i].value = 0;
+            objPassed[i].value = 1;
+            shakeX.value = (Math.random() - 0.5) * 2 * GameGeometry.shake;
+            shakeY.value = (Math.random() - 0.5) * 2 * GameGeometry.shake;
+            continue;
+          }
           gameState.value = 2;
           shakeX.value = (Math.random() - 0.5) * 2 * GameGeometry.shake;
           shakeY.value = (Math.random() - 0.5) * 2 * GameGeometry.shake;
@@ -213,8 +240,11 @@ export function useOrbitEngine(): OrbitEngine {
           runOnJS(handleNearMiss)();
         }
       } else if (objType[i].value === 2) {
-        // shard
-        if (dy < GameGeometry.shardHitY && sameLane) {
+        // shard — magnet collects from either lane
+        const magnetHit = magnetGlow.value > 0
+          ? dy < GameGeometry.shardHitY
+          : dy < GameGeometry.shardHitY && sameLane;
+        if (magnetHit) {
           objActive[i].value = 0;
           shards.value += 1;
           score.value += 10;
@@ -334,9 +364,13 @@ export function useOrbitEngine(): OrbitEngine {
     shakeX.value = 0;
     shakeY.value = 0;
     nearMissPulse.value = 0;
+    shieldGlow.value = 0;
+    magnetGlow.value = 0;
     setReviveUsed(false);
     setRunShards(0);
     setFinalScore(0);
+    setShieldActive(false);
+    setMagnetActive(false);
     gameState.value = 1;
     setScreen('playing');
     startSpawnLoop();
@@ -433,6 +467,34 @@ export function useOrbitEngine(): OrbitEngine {
     setScreen('idle');
   }, [gameState, stopSpawnLoop]);
 
+  const pause = useCallback(() => {
+    if (gameState.value !== 1) return;
+    gameState.value = 0; // freeze frame loop
+    stopSpawnLoop();
+  }, [gameState, stopSpawnLoop]);
+
+  const resume = useCallback(() => {
+    if (gameState.value !== 0 || screen !== 'playing') return;
+    gameState.value = 1;
+    lastTime.value = 0; // reset dt to avoid jump
+    startSpawnLoop();
+  }, [gameState, screen, lastTime, startSpawnLoop]);
+
+  const equipShield = useCallback(() => {
+    shieldGlow.value = 1;
+    setShieldActive(true);
+  }, [shieldGlow]);
+
+  const equipMagnet = useCallback(() => {
+    magnetGlow.value = 1;
+    setMagnetActive(true);
+    // Magnet lasts 10 seconds
+    setTimeout(() => {
+      magnetGlow.value = 0;
+      setMagnetActive(false);
+    }, 10000);
+  }, [magnetGlow]);
+
   // hydrate wallet & high score on first render
   const hydrated = useRef(false);
   if (!hydrated.current) {
@@ -455,6 +517,8 @@ export function useOrbitEngine(): OrbitEngine {
     reviveUsed,
     runShards,
     finalScore,
+    shieldActive,
+    magnetActive,
     scrollOffset,
     playerX,
     playerLane,
@@ -468,6 +532,8 @@ export function useOrbitEngine(): OrbitEngine {
     gameState,
     screenW,
     screenH,
+    shieldGlow,
+    magnetGlow,
     objWorldY,
     objLane,
     objType,
@@ -480,5 +546,9 @@ export function useOrbitEngine(): OrbitEngine {
     endRunAndCommit,
     setScreenSize,
     goHome,
+    pause,
+    resume,
+    equipShield,
+    equipMagnet,
   };
 }

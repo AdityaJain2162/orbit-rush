@@ -9,7 +9,7 @@
 import React, { useCallback, useEffect } from 'react';
 import { StyleSheet, View, useWindowDimensions } from 'react-native';
 import Animated, { useAnimatedStyle } from 'react-native-reanimated';
-import { Colors, GameGeometry } from '../theme/theme';
+import { Colors, GameGeometry, PlayerSkin } from '../theme/theme';
 import type { OrbitEngine } from './useOrbitEngine';
 
 const ORB_SIZE = 28;
@@ -47,6 +47,25 @@ export const OrbitCanvas: React.FC<{ engine: OrbitEngine }> = ({ engine }) => {
       opacity: GameGeometry.trailOpacities[i],
     })),
   );
+
+  // ---- Shield ring (visible when shield is active) ----
+  const shieldStyle = useAnimatedStyle(() => ({
+    transform: [
+      { translateX: engine.playerX.value - 24 },
+      { translateY: playerY - 24 },
+      { scale: 1 + engine.shieldGlow.value * 0.1 },
+    ],
+    opacity: engine.shieldGlow.value,
+  }));
+
+  // ---- Magnet aura (visible when magnet is active) ----
+  const magnetStyle = useAnimatedStyle(() => ({
+    transform: [
+      { translateX: engine.playerX.value - 40 },
+      { translateY: playerY - 40 },
+    ],
+    opacity: engine.magnetGlow.value * 0.3,
+  }));
 
   // ---- Lane line scroll (decorative, moves down with world) ----
   const laneLineStyle = useAnimatedStyle(() => {
@@ -133,10 +152,28 @@ export const OrbitCanvas: React.FC<{ engine: OrbitEngine }> = ({ engine }) => {
         />
       ))}
 
+      {/* Magnet aura */}
+      <Animated.View
+        style={[
+          styles.magnetAura,
+          { width: 80, height: 80, borderRadius: 40 },
+          magnetStyle,
+        ]}
+      />
+
       {/* Hazards & shards (style determined in worklet) */}
       {objStyles.map((s, i) => (
         <Animated.View key={`obj-${i}`} style={[styles.objBase, s]} />
       ))}
+
+      {/* Shield ring */}
+      <Animated.View
+        style={[
+          styles.shieldRing,
+          { width: 48, height: 48, borderRadius: 24 },
+          shieldStyle,
+        ]}
+      />
 
       {/* Player */}
       <Animated.View
@@ -169,20 +206,20 @@ const styles = StyleSheet.create({
     top: 0,
     bottom: 0,
     width: 1.5,
-    backgroundColor: Colors.playerGlow,
+    backgroundColor: PlayerSkin.glow,
     opacity: 0.15,
   },
   orb: {
     position: 'absolute',
-    backgroundColor: Colors.playerCore,
-    shadowColor: Colors.playerGlow,
+    backgroundColor: PlayerSkin.core,
+    shadowColor: PlayerSkin.glow,
     shadowOffset: { width: 0, height: 0 },
     shadowRadius: 18,
     shadowOpacity: 0.9,
     elevation: 6,
   },
   trail: {
-    backgroundColor: Colors.playerCore,
+    backgroundColor: PlayerSkin.core,
     shadowRadius: 10,
     shadowOpacity: 0.5,
   },
@@ -192,6 +229,26 @@ const styles = StyleSheet.create({
     shadowRadius: 14,
     shadowOpacity: 0.9,
     elevation: 5,
+  },
+  shieldRing: {
+    position: 'absolute',
+    borderWidth: 2.5,
+    borderColor: '#00FFAA',
+    backgroundColor: 'transparent',
+    shadowColor: '#00FFAA',
+    shadowOffset: { width: 0, height: 0 },
+    shadowRadius: 16,
+    shadowOpacity: 0.9,
+  },
+  magnetAura: {
+    position: 'absolute',
+    borderWidth: 1.5,
+    borderColor: '#FFEE00',
+    backgroundColor: 'rgba(255, 238, 0, 0.08)',
+    shadowColor: '#FFEE00',
+    shadowOffset: { width: 0, height: 0 },
+    shadowRadius: 20,
+    shadowOpacity: 0.6,
   },
 });
 

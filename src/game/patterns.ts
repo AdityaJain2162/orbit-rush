@@ -111,7 +111,8 @@ export const PATTERNS: Pattern[] = [
     rows: [
       [0, 2],
       [2, 0],
-      [1, 1],
+      [1, 0],
+      [0, 1],
       [2, 0],
       [0, 2],
     ],
@@ -126,7 +127,7 @@ export const PATTERNS: Pattern[] = [
       [2, 2],
       [0, 0],
       [1, 0],
-      [1, 1],
+      [1, 0],
       [0, 1],
     ],
     minSpeed: 300,
@@ -134,16 +135,16 @@ export const PATTERNS: Pattern[] = [
 
   // ===== Tier 2: Hard (speed >= 420) =====
 
-  // Wall gap: both lanes blocked except one gap
+  // Wall gap: both lanes blocked except one gap per wall
   {
     name: 'wallGap',
     rows: [
-      [1, 1],
       [1, 0],
-      [1, 1],
-      [1, 1],
+      [1, 0],
       [0, 1],
-      [1, 1],
+      [1, 0],
+      [0, 1],
+      [0, 1],
     ],
     minSpeed: 420,
   },

@@ -1,19 +1,49 @@
 /**
- * StartScreen.tsx — title / menu screen with neon branding and start button.
+ * StartScreen.tsx — title / menu screen with neon branding, daily challenge,
+ * streak, and menu buttons (Play, Leaderboard, Shop, Achievements, Settings).
  */
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { BannerAd } from '../components/BannerAd';
 import { NeonButton } from '../components/NeonButton';
 import { Colors, Fonts, Spacing } from '../theme/theme';
+import type { DailyState } from '../services/storage';
 
 interface StartScreenProps {
   highScore: number;
   wallet: number;
+  daily: DailyState | null;
+  streak: number;
   onStart: () => void;
+  onLeaderboard: () => void;
+  onShop: () => void;
+  onAchievements: () => void;
+  onSettings: () => void;
 }
 
-export const StartScreen: React.FC<StartScreenProps> = ({ highScore, wallet, onStart }) => {
+export const StartScreen: React.FC<StartScreenProps> = ({
+  highScore,
+  wallet,
+  daily,
+  streak,
+  onStart,
+  onLeaderboard,
+  onShop,
+  onAchievements,
+  onSettings,
+}) => {
+  const challengeText = daily
+    ? daily.challengeType === 'score'
+      ? `Score ${daily.challengeTarget}`
+      : `Collect ${daily.challengeTarget} shards`
+    : '';
+  const challengeProgress = daily
+    ? daily.challengeType === 'score'
+      ? daily.challengeScore
+      : daily.challengeShards
+    : 0;
+  const challengeDone = daily ? challengeProgress >= daily.challengeTarget : false;
+
   return (
     <View style={styles.container}>
       <View style={styles.brand}>
@@ -23,15 +53,41 @@ export const StartScreen: React.FC<StartScreenProps> = ({ highScore, wallet, onS
       </View>
 
       <View style={styles.meta}>
-        <Text style={styles.metaLabel}>BEST</Text>
-        <Text style={styles.metaValue}>{highScore}</Text>
-        <Text style={[styles.metaLabel, styles.walletLabel]}>SHARD BANK</Text>
-        <Text style={styles.shardValue}>{wallet}</Text>
+        <View style={styles.metaRow}>
+          <View style={styles.metaItem}>
+            <Text style={styles.metaLabel}>BEST</Text>
+            <Text style={styles.metaValue}>{highScore}</Text>
+          </View>
+          <View style={styles.metaItem}>
+            <Text style={styles.metaLabel}>SHARDS</Text>
+            <Text style={styles.shardValue}>{wallet}</Text>
+          </View>
+          <View style={styles.metaItem}>
+            <Text style={styles.metaLabel}>STREAK</Text>
+            <Text style={[styles.metaValue, { color: Colors.nearMiss }]}>
+              {streak > 0 ? `${streak}🔥` : '0'}
+            </Text>
+          </View>
+        </View>
+
+        {daily && (
+          <View style={styles.challengeCard}>
+            <Text style={styles.challengeTitle}>DAILY CHALLENGE</Text>
+            <Text style={styles.challengeDesc}>
+              {challengeText} {challengeDone ? '✓' : `(${challengeProgress}/${daily.challengeTarget})`}
+            </Text>
+          </View>
+        )}
       </View>
 
       <View style={styles.actions}>
         <NeonButton label="▶ TAP TO PLAY" variant="primary" onPress={onStart} style={styles.play} />
-        <Text style={styles.hint}>Tap anywhere to switch between inside / outside track</Text>
+        <View style={styles.menuRow}>
+          <NeonButton label="🏆" variant="ghost" onPress={onLeaderboard} style={styles.menuBtn} />
+          <NeonButton label="🎨" variant="ghost" onPress={onShop} style={styles.menuBtn} />
+          <NeonButton label="🎖️" variant="ghost" onPress={onAchievements} style={styles.menuBtn} />
+          <NeonButton label="⚙️" variant="ghost" onPress={onSettings} style={styles.menuBtn} />
+        </View>
       </View>
 
       <BannerAd />
@@ -45,7 +101,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.void,
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: Spacing.xxl * 2,
+    paddingVertical: Spacing.xxl * 1.5,
     paddingHorizontal: Spacing.lg,
   },
   brand: {
@@ -79,6 +135,16 @@ const styles = StyleSheet.create({
   },
   meta: {
     alignItems: 'center',
+    width: '100%',
+  },
+  metaRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    width: '100%',
+    marginBottom: Spacing.md,
+  },
+  metaItem: {
+    alignItems: 'center',
   },
   metaLabel: {
     fontFamily: Fonts.RajdhaniSemiBold,
@@ -86,18 +152,37 @@ const styles = StyleSheet.create({
     letterSpacing: 2,
     color: Colors.textMuted,
   },
-  walletLabel: {
-    marginTop: Spacing.md,
-  },
   metaValue: {
     fontFamily: Fonts.OrbitronBlack,
-    fontSize: 36,
+    fontSize: 28,
     color: Colors.playerCore,
   },
   shardValue: {
     fontFamily: Fonts.OrbitronBold,
     fontSize: 28,
     color: Colors.shard,
+  },
+  challengeCard: {
+    marginTop: Spacing.sm,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.sm,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: Colors.glassBorder,
+    backgroundColor: Colors.glass,
+    alignItems: 'center',
+  },
+  challengeTitle: {
+    fontFamily: Fonts.RajdhaniBold,
+    fontSize: 11,
+    letterSpacing: 2,
+    color: Colors.nearMiss,
+  },
+  challengeDesc: {
+    fontFamily: Fonts.RajdhaniSemiBold,
+    fontSize: 13,
+    color: Colors.textPrimary,
+    marginTop: 2,
   },
   actions: {
     alignItems: 'center',
@@ -106,12 +191,14 @@ const styles = StyleSheet.create({
   play: {
     width: '100%',
   },
-  hint: {
-    fontFamily: Fonts.RajdhaniSemiBold,
-    fontSize: 12,
-    color: Colors.textMuted,
+  menuRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: Spacing.sm,
     marginTop: Spacing.md,
-    textAlign: 'center',
+  },
+  menuBtn: {
+    width: 56,
   },
 });
 

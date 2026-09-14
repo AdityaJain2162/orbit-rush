@@ -38,6 +38,22 @@ export const Colors = {
   textMuted: 'rgba(245, 247, 255, 0.6)',
 } as const;
 
+/**
+ * Runtime player skin colors — overridden by the equipped skin.
+ * Components read from this instead of Colors.playerCore/Glow/Trail.
+ */
+export const PlayerSkin: { core: string; glow: string; trail: string } = {
+  core: Colors.playerCore,
+  glow: Colors.playerGlow,
+  trail: Colors.playerTrail,
+};
+
+export function setPlayerSkin(core: string, glow: string, trail: string) {
+  PlayerSkin.core = core;
+  PlayerSkin.glow = glow;
+  PlayerSkin.trail = trail;
+}
+
 export const Fonts = {
   OrbitronBold: 'Orbitron_700Bold',
   OrbitronBlack: 'Orbitron_900Black',

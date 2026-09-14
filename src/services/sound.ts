@@ -21,6 +21,18 @@ import type { AudioPlayer } from 'expo-audio';
 let audioMod: typeof import('expo-audio') | null = null;
 let avAvailable = true; // becomes false after first failed require
 
+// Runtime settings — toggled by the settings panel.
+let soundEnabled = true;
+let vibrationEnabled = true;
+
+export function setSoundEnabled(enabled: boolean) {
+  soundEnabled = enabled;
+}
+
+export function setVibrationEnabled(enabled: boolean) {
+  vibrationEnabled = enabled;
+}
+
 async function ensureAudio(): Promise<typeof import('expo-audio') | null> {
   if (!avAvailable) return null;
   if (audioMod) return audioMod;
@@ -78,6 +90,7 @@ export async function preloadSounds(): Promise<void> {
 }
 
 async function play(name: SoundName, volume = 0.8): Promise<void> {
+  if (!soundEnabled) return;
   try {
     const player = await loadSound(name);
     if (!player) return;
@@ -108,6 +121,7 @@ export const Sound = {
 /** Haptics — best effort, never throw. */
 export const Haptic = {
   light: () => {
+    if (!vibrationEnabled) return;
     try {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
     } catch {
@@ -115,6 +129,7 @@ export const Haptic = {
     }
   },
   medium: () => {
+    if (!vibrationEnabled) return;
     try {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     } catch {
@@ -122,6 +137,7 @@ export const Haptic = {
     }
   },
   heavy: () => {
+    if (!vibrationEnabled) return;
     try {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
     } catch {
@@ -129,6 +145,7 @@ export const Haptic = {
     }
   },
   error: () => {
+    if (!vibrationEnabled) return;
     try {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
     } catch {
